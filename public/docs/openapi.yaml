@@ -1,0 +1,1702 @@
+openapi: 3.0.3
+info:
+  title: Arch Ops API
+  version: 1.0.0
+  description: |
+    REST API for **Arch Ops**, the purchase approval, vendor and site labor app for architecture firms.
+    The React frontend (`arch-crm-fe`) already speaks this contract through `src/api/django.ts`; point it at
+    the server with `VITE_API_BASE_URL` (e.g. `http://localhost:8000/api/v1`).
+
+    ## Conventions
+    - **Base path** `/api/v1`. Every path ends with a slash (Django style).
+    - **Auth**: JWT bearer (`Authorization: Bearer <access>`). `POST /auth/login/` returns an access/refresh pair,
+      `POST /auth/refresh/` rotates it. The frontend refreshes once on any `401`, then signs the user out.
+    - **IDs** are UUIDs. **Timestamps** are ISO 8601 with timezone. **Dates** are `YYYY-MM-DD`.
+    - **Money and quantities are JSON numbers**, not strings (DRF: `COERCE_DECIMAL_TO_STRING = False`).
+    - **Lists** are paginated `{ count, next, previous, results }` with `page` / `page_size` (default 50, max 500).
+      Comma-separated values are accepted for multi-value filters, e.g. `?status=awaiting_gm,awaiting_owner`.
+    - **Ordering** via `?ordering=field` or `?ordering=-field`.
+    - **Nested reads, flat writes**: responses embed related objects (`project`, `requester`, `vendor` …) next to
+      their `*_id`; request bodies only send the `*_id`.
+    - **Errors** always look like `Error`: `{ "detail": "...", "code": "...", "errors": { "field": ["..."] } }`.
+      `code` is one of `validation`, `unauthorized`, `forbidden`, `not_found`, `conflict` (unique value taken),
+      `in_use` (protected by a foreign key, archive instead). The UI shows `detail` to people, so write it as a sentence.
+
+    ## Accounts
+    There is **no public sign-up**.
+    1. The **first admin is seeded** once at deploy time (`python manage.py seed_admin`, reading `ADMIN_EMAIL`,
+       `ADMIN_PASSWORD`, `ADMIN_NAME`).
+    2. That admin adds everyone else from **Admin → Users** in the app (`POST /users/`) with a **temporary password**
+       and shares it privately. No email is sent.
+    3. The person signs in and changes it on their Account page (`POST /auth/change-password/`).
+
+    Admins edit name, role and department with `PATCH /users/{id}/`, and remove access with `is_active: false`
+    (users are never deleted, so their history stays attributed).
+
+    ## Roles
+    | Role | Can do |
+    |---|---|
+    | `employee` | Create purchase and labor requests; see own requests and their department's submitted ones |
+    | `finance` | Stage 1 approval; add/select quotes during review; record purchases; manage vendors |
+    | `general_manager` | Stage 2 approval; run labor requests (review, assign, progress) |
+    | `owner` | Stage 3 (final) approval; record purchases; manage vendors, projects, departments; read audit log |
+    | `admin` | Everything except approving; manage users and roles |
+
+    Nobody may approve their own request. Only admins change roles.
+
+    ## Purchase request workflow
+    ```
+    draft ──(add quote)──▶ quote_received ──submit──▶ awaiting_finance ──approve──▶ awaiting_gm ──approve──▶ awaiting_owner ──approve──▶ approved
+                                  ▲                        │  │                        │  │                        │  │
+                                  └──────── return ────────┘  └────── reject ──────────┴──┴────────────────────────┘  └──▶ rejected
+    approved ──record-purchase──▶ purchased ──complete──▶ completed
+    ```
+    `status` is **read-only** on every write endpoint; it only moves through the workflow actions, which run in one
+    transaction each: check the role, update `approvals`, write an `AuditEvent`, create `Notification`s.
+
+    ## Side effects the server owns
+    The frontend never writes audit events or notifications; the server creates them.
+
+    | Event | Audit `action` | Notify |
+    |---|---|---|
+    | Purchase request created / edited | `purchase_created` / `purchase_updated` | — |
+    | Submitted | `purchase_submitted` | all `finance` users (kind `review`); requester (`system`) |
+    | Finance approves | `finance_approved` | all `general_manager` (`review`); requester (`approved`) |
+    | GM approves | `gm_approved` | all `owner` (`review`); requester (`approved`) |
+    | Owner approves | `owner_approved` | requester (`approved`); all `finance` (`purchased`, ready to buy) |
+    | Rejected | `rejected` | requester (`rejected`, body = reason) |
+    | Returned | `returned` | requester (`returned`, body = note) |
+    | Purchase recorded | `purchased` | requester (`purchased`) |
+    | Completed | `completed` | requester (`approved`); all `owner` (`system`) |
+    | Labor requested | `labor_requested` | all `general_manager` + `admin` (`labor`) |
+    | Labor status / crew changed | `labor_<status>` / `labor_assigned` | requester (`labor`) |
+    | Stalled approval (cron, e.g. 48 h) | — | the role that is due (`reminder`), once per window |
+
+    Notification `link` is the frontend route to open: `/requests/<id>` or `/labor/<id>`.
+    Never notify the person who caused the event.
+  contact:
+    name: Ethix
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Local Django
+  - url: https://api.example.com/api/v1
+    description: Production (replace with the real host)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Users
+  - name: Departments
+  - name: Projects
+  - name: Vendors
+  - name: Purchase requests
+  - name: Purchase workflow
+  - name: Quotations
+  - name: Attachments
+  - name: Labor requests
+  - name: Audit
+  - name: Notifications
+
+paths:
+  # ── Auth ──────────────────────────────────────────────────────────────────
+  /auth/login/:
+    post:
+      tags: [Auth]
+      summary: Sign in with email and password
+      operationId: authLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401':
+          description: Wrong email or password, or the account is inactive
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { detail: 'Email or password is incorrect', code: unauthorized }
+
+  /auth/refresh/:
+    post:
+      tags: [Auth]
+      summary: Exchange a refresh token for a new access token
+      description: With `ROTATE_REFRESH_TOKENS` the response also carries a new refresh token; the client stores it.
+      operationId: authRefresh
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh]
+              properties:
+                refresh: { type: string }
+      responses:
+        '200':
+          description: New tokens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout/:
+    post:
+      tags: [Auth]
+      summary: Revoke (blacklist) a refresh token
+      operationId: authLogout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh]
+              properties:
+                refresh: { type: string }
+      responses:
+        '204': { description: Signed out }
+
+  /auth/me/:
+    get:
+      tags: [Auth]
+      summary: The signed-in user
+      operationId: authMe
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      tags: [Auth]
+      summary: Update your own name
+      description: Role and department are admin-only and are rejected here.
+      operationId: authUpdateMe
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MePatch' }
+      responses:
+        '200':
+          description: Updated user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /auth/change-password/:
+    post:
+      tags: [Auth]
+      summary: Change your password
+      description: Runs Django's password validators. Existing sessions stay signed in.
+      operationId: authChangePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password: { type: string, format: password, minLength: 8 }
+      responses:
+        '204': { description: Password changed }
+        '400':
+          description: Current password wrong or new password too weak
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { detail: 'Your current password is incorrect', code: validation, errors: { current_password: ['Your current password is incorrect'] } }
+
+  # ── Users ─────────────────────────────────────────────────────────────────
+  /users/:
+    get:
+      tags: [Users]
+      summary: List team members
+      description: Everyone signed in can see the team (names, roles, departments).
+      operationId: usersList
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/Role' }
+        - name: department
+          in: query
+          schema: { type: string }
+        - name: ordering
+          in: query
+          schema: { type: string, enum: [full_name, -full_name, email, role, date_joined, -date_joined], default: full_name }
+      responses:
+        '200':
+          description: Users
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedUsers' }
+    post:
+      tags: [Users]
+      summary: Add a person (admin)
+      description: |
+        Admin only. Creates an active, ready-to-use account with the given temporary password; no email is sent.
+        The admin shares the password privately and the person changes it after signing in.
+        `email` is stored lower-cased and must be unique (`409 conflict`). `avatar_initials` defaults to the
+        first letters of `full_name`. Writes a `user_created` audit event (never include the password in it).
+      operationId: usersCreate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /users/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Users]
+      summary: Get a user
+      operationId: usersRetrieve
+      responses:
+        '200':
+          description: User
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Users]
+      summary: Edit a user's name, role, department or active flag (admin)
+      operationId: usersUpdate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserPatch' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ── Departments ───────────────────────────────────────────────────────────
+  /departments/:
+    get:
+      tags: [Departments]
+      summary: List departments
+      description: Includes `member_count` (users whose `department` equals this name).
+      operationId: departmentsList
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/IsActive'
+        - name: ordering
+          in: query
+          schema: { type: string, enum: [name, -name, created_at, -created_at], default: name }
+      responses:
+        '200':
+          description: Departments
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedDepartments' }
+    post:
+      tags: [Departments]
+      summary: Create a department (admin, owner)
+      operationId: departmentsCreate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DepartmentInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Department' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /departments/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: [Departments]
+      summary: Rename or archive a department (admin, owner)
+      description: Renaming does not move people or past requests; they keep the old name until edited.
+      operationId: departmentsUpdate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DepartmentInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Department' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Departments]
+      summary: Delete a department (admin, owner)
+      operationId: departmentsDelete
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ── Projects ──────────────────────────────────────────────────────────────
+  /projects/:
+    get:
+      tags: [Projects]
+      summary: List projects
+      description: |
+        Includes `spent_amount`: the sum over the project's requests in `approved`, `purchased` or `completed`
+        of `coalesce(actual_amount, approved_amount, estimated_amount)`.
+      operationId: projectsList
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/IsActive'
+        - $ref: '#/components/parameters/Search'
+        - name: ordering
+          in: query
+          schema: { type: string, enum: [name, -name, code, created_at, -created_at], default: name }
+      responses:
+        '200':
+          description: Projects
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedProjects' }
+    post:
+      tags: [Projects]
+      summary: Create a project (admin, owner)
+      operationId: projectsCreate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /projects/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Projects]
+      summary: Get a project
+      operationId: projectsRetrieve
+      responses:
+        '200':
+          description: Project
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Projects]
+      summary: Edit or archive a project (admin, owner)
+      operationId: projectsUpdate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProjectInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Project' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Projects]
+      summary: Delete a project (admin, owner)
+      description: Fails with `409 in_use` when any purchase or labor request points at it (`on_delete=PROTECT`).
+      operationId: projectsDelete
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InUse' }
+
+  # ── Vendors ───────────────────────────────────────────────────────────────
+  /vendors/:
+    get:
+      tags: [Vendors]
+      summary: List vendors
+      operationId: vendorsList
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/IsActive'
+        - $ref: '#/components/parameters/Search'
+        - name: ordering
+          in: query
+          schema: { type: string, enum: [name, -name, created_at, -created_at], default: name }
+      responses:
+        '200':
+          description: Vendors
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedVendors' }
+    post:
+      tags: [Vendors]
+      summary: Create a vendor (admin, owner, finance)
+      operationId: vendorsCreate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VendorInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vendor' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /vendors/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Vendors]
+      summary: Get a vendor
+      operationId: vendorsRetrieve
+      responses:
+        '200':
+          description: Vendor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vendor' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Vendors]
+      summary: Edit or archive a vendor (admin, owner, finance)
+      operationId: vendorsUpdate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VendorInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Vendor' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /vendors/{id}/history/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Vendors]
+      summary: Quotation history for a vendor
+      description: |
+        Every quote this vendor gave on a request the caller can see (newest first), each with the amounts of all
+        quotes on that request (`competing`, this one included), plus the `quotation` attachments of the requests
+        where this vendor's quote was selected.
+      operationId: vendorsHistory
+      responses:
+        '200':
+          description: History
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorHistory' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ── Purchase requests ─────────────────────────────────────────────────────
+  /purchase-requests/:
+    get:
+      tags: [Purchase requests]
+      summary: List purchase requests
+      description: |
+        Visibility: finance, GM, owner and admin see all; everyone else sees requests they raised plus
+        requests in their own department. Drafts (`draft`, `quote_received`) are visible only to their requester and admins.
+      operationId: purchaseRequestsList
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/Search'
+        - name: status
+          in: query
+          description: One or more statuses, comma separated
+          schema: { type: string, example: 'awaiting_finance,awaiting_gm' }
+        - name: requester
+          in: query
+          description: A user id, or `me`
+          schema: { type: string }
+        - name: project
+          in: query
+          schema: { type: string, format: uuid }
+        - name: department
+          in: query
+          schema: { type: string }
+        - name: ordering
+          in: query
+          schema: { type: string, enum: [created_at, -created_at, required_date, -required_date, estimated_amount, -estimated_amount], default: -created_at }
+      responses:
+        '200':
+          description: Requests (with `project` and `requester`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedPurchaseRequests' }
+    post:
+      tags: [Purchase requests]
+      summary: Create a draft
+      description: '`requester` is the caller, `status` is `draft`, `request_number` is generated (`PR-<year>-<seq>`).'
+      operationId: purchaseRequestsCreate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurchaseRequestInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequestDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /purchase-requests/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Purchase requests]
+      summary: Get a request with items, quotes, approvals and attachments
+      operationId: purchaseRequestsRetrieve
+      responses:
+        '200':
+          description: Request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequestDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Purchase requests]
+      summary: Edit a draft
+      description: Requester only (or admin), and only while `draft` / `quote_received`. `status` cannot be written.
+      operationId: purchaseRequestsUpdate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurchaseRequestInput' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequestDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Purchase requests]
+      summary: Delete a draft
+      description: Requester while `draft` / `quote_received`, or admin. Items, quotes, approvals and attachments cascade.
+      operationId: purchaseRequestsDelete
+      responses:
+        '204': { description: Deleted }
+        '403':
+          description: Not yours, or already submitted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { detail: 'This request can no longer be deleted', code: forbidden }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /purchase-requests/{id}/items/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: [Purchase requests]
+      summary: Replace all line items
+      description: Deletes the current items and inserts these, atomically. Same edit rules as `PATCH /purchase-requests/{id}/`.
+      operationId: purchaseRequestsReplaceItems
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '#/components/schemas/PurchaseItemInput' }
+      responses:
+        '200':
+          description: The saved items
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PurchaseItem' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-requests/{id}/quotations/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Quotations]
+      summary: Add a vendor quotation
+      description: |
+        Requester while `draft` / `quote_received` / `awaiting_finance`; finance and admin until `purchased`.
+        The first quote on a `draft` moves it to `quote_received`. Upload the quote file separately as an
+        attachment of type `quotation`.
+      operationId: quotationsCreate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/QuotationInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorQuotation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /quotations/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    delete:
+      tags: [Quotations]
+      summary: Remove a quotation
+      description: Same permissions as adding one.
+      operationId: quotationsDelete
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /quotations/{id}/select/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Quotations]
+      summary: Mark the chosen quote
+      description: Sets `is_selected` on this quote and clears it on every other quote of the same request.
+      operationId: quotationsSelect
+      responses:
+        '200':
+          description: The selected quote
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VendorQuotation' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ── Workflow ──────────────────────────────────────────────────────────────
+  /purchase-requests/{id}/submit/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Purchase workflow]
+      summary: Submit for Finance review
+      description: |
+        `draft` / `quote_received` → `awaiting_finance`. Requester (or admin) only; needs at least one quotation.
+        Sets `submitted_at`, clears `return_note` / `rejection_reason`, and restarts the approval chain with one
+        pending `finance` approval.
+      operationId: purchaseSubmit
+      responses:
+        '200':
+          description: Updated request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequestDetail' }
+        '400':
+          description: Not submittable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                noQuote: { value: { detail: 'Add at least one vendor quotation before submitting', code: validation } }
+                already: { value: { detail: 'This request has already been submitted', code: validation } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-requests/{id}/decide/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Purchase workflow]
+      summary: Approve, reject or return at the current stage
+      description: |
+        Only the role of the current stage may decide (`awaiting_finance` → finance, `awaiting_gm` → general_manager,
+        `awaiting_owner` → owner), and never on their own request.
+
+        - `approve`: marks the stage approved, opens the next pending stage, moves the status on. `approved_amount`
+          (optional) overrides the amount; on final approval it defaults to `estimated_amount` when never set.
+        - `reject`: `comment` required. Status `rejected`, `rejection_reason = comment`.
+        - `return`: `comment` required. Status `quote_received`, `return_note = comment`, approvals cleared.
+      operationId: purchaseDecide
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DecisionInput' }
+      responses:
+        '200':
+          description: Updated request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequestDetail' }
+        '400':
+          description: Missing reason or not awaiting approval
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { detail: 'Add a reason', code: validation }
+        '403':
+          description: Not your stage, or your own request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              examples:
+                turn: { value: { detail: 'It is not your turn to review this request', code: forbidden } }
+                self: { value: { detail: 'You cannot approve your own request', code: forbidden } }
+
+  /purchase-requests/{id}/record-purchase/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Purchase workflow]
+      summary: Record the purchase
+      description: '`approved` → `purchased`. Finance, owner or admin. Upload the receipt separately (type `receipt`).'
+      operationId: purchaseRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actual_amount]
+              properties:
+                actual_amount: { type: number, minimum: 0.01, example: 4180.5 }
+      responses:
+        '200':
+          description: Updated request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequestDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-requests/{id}/complete/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Purchase workflow]
+      summary: Mark delivered and complete
+      description: '`purchased` → `completed`. Finance, owner, admin, or the requester.'
+      operationId: purchaseComplete
+      responses:
+        '200':
+          description: Updated request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PurchaseRequestDetail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ── Attachments ───────────────────────────────────────────────────────────
+  /purchase-requests/{id}/attachments/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Attachments]
+      summary: List a request's attachments
+      operationId: attachmentsList
+      responses:
+        '200':
+          description: Attachments, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Attachment' }
+    post:
+      tags: [Attachments]
+      summary: Upload a document
+      description: |
+        Anyone who can see the request. Max **10 MB**; PDF, PNG, JPEG, WEBP, DOCX or XLSX only (check the content, not
+        just the extension). Store under `<request id>/<random uuid>.<ext>` in private storage; keep the original name
+        in `file_name`.
+      operationId: attachmentsCreate
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, attachment_type]
+              properties:
+                file: { type: string, format: binary }
+                attachment_type: { $ref: '#/components/schemas/AttachmentType' }
+                description: { type: string, maxLength: 500 }
+      responses:
+        '201':
+          description: Uploaded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Attachment' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /attachments/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    delete:
+      tags: [Attachments]
+      summary: Delete an attachment
+      description: The uploader or an admin.
+      operationId: attachmentsDelete
+      responses:
+        '204': { description: Deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /attachments/{id}/download/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Attachments]
+      summary: Get a short-lived link to open the file
+      description: An absolute, signed URL valid for about 5 minutes (S3 presigned URL, or a signed Django view).
+      operationId: attachmentsDownload
+      responses:
+        '200':
+          description: Link
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url, expires_at]
+                properties:
+                  url: { type: string, format: uri }
+                  expires_at: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ── Labor ─────────────────────────────────────────────────────────────────
+  /labor-requests/:
+    get:
+      tags: [Labor requests]
+      summary: List labor requests
+      description: Everyone signed in sees the site plan.
+      operationId: laborRequestsList
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          description: One or more statuses, comma separated
+          schema: { type: string }
+        - name: project
+          in: query
+          schema: { type: string, format: uuid }
+        - name: requested_by
+          in: query
+          description: A user id, or `me`
+          schema: { type: string }
+        - name: ordering
+          in: query
+          schema: { type: string, enum: [created_at, -created_at, required_at, -required_at], default: -created_at }
+      responses:
+        '200':
+          description: Labor requests (with `project` and `requester`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedLaborRequests' }
+    post:
+      tags: [Labor requests]
+      summary: Request a crew
+      description: '`requested_by` is the caller, status `requested`, `request_number` generated (`LR-<year>-<seq>`).'
+      operationId: laborRequestsCreate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LaborRequestInput' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaborRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /labor-requests/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: [Labor requests]
+      summary: Get a labor request
+      operationId: laborRequestsRetrieve
+      responses:
+        '200':
+          description: Labor request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaborRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Labor requests]
+      summary: Move, assign or annotate a labor request
+      description: |
+        GM, owner and admin may change anything, moving forward through
+        `requested → reviewed → assigned → in_progress → completed`, or to `cancelled` from any open status.
+        The requester may only cancel while it is still `requested`.
+      operationId: laborRequestsUpdate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LaborRequestPatch' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LaborRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ── Audit ─────────────────────────────────────────────────────────────────
+  /audit-events/:
+    get:
+      tags: [Audit]
+      summary: Read the audit trail
+      description: |
+        Append-only; there are no write endpoints. Every signed-in user can read it (the dashboard activity heatmap
+        and the labor timeline use it for all roles); the full Audit Log page is only linked for owner and admin.
+      operationId: auditEventsList
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: entity_type
+          in: query
+          schema: { type: string, enum: [purchase_request, labor_request, vendor, project, department, user] }
+        - name: entity_id
+          in: query
+          schema: { type: string }
+        - name: actor
+          in: query
+          schema: { type: string, format: uuid }
+        - name: action
+          in: query
+          schema: { type: string }
+        - name: since
+          in: query
+          description: Inclusive lower bound on `created_at`
+          schema: { type: string, format: date-time }
+        - name: until
+          in: query
+          schema: { type: string, format: date-time }
+        - name: ordering
+          in: query
+          schema: { type: string, enum: [created_at, -created_at], default: -created_at }
+      responses:
+        '200':
+          description: Events (with `actor`)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedAuditEvents' }
+
+  # ── Notifications ─────────────────────────────────────────────────────────
+  /notifications/:
+    get:
+      tags: [Notifications]
+      summary: Your notifications
+      description: Only the caller's own. The frontend polls the first page every 15 s while the tab is visible.
+      operationId: notificationsList
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: is_read
+          in: query
+          schema: { type: boolean }
+        - name: ordering
+          in: query
+          schema: { type: string, enum: [created_at, -created_at], default: -created_at }
+      responses:
+        '200':
+          description: Notifications
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedNotifications' }
+
+  /notifications/{id}/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    delete:
+      tags: [Notifications]
+      summary: Dismiss one notification
+      operationId: notificationsDelete
+      responses:
+        '204': { description: Deleted }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notifications/{id}/read/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Notifications]
+      summary: Mark one as read
+      operationId: notificationsRead
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Notification' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notifications/read-all/:
+    post:
+      tags: [Notifications]
+      summary: Mark all of yours as read
+      operationId: notificationsReadAll
+      responses:
+        '200':
+          description: How many changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer, example: 4 }
+
+  /notifications/bulk-delete/:
+    post:
+      tags: [Notifications]
+      summary: Dismiss several notifications
+      description: Ids that are not yours are ignored.
+      operationId: notificationsBulkDelete
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids:
+                  type: array
+                  maxItems: 200
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: How many were deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: integer, example: 3 }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 500, default: 50 }
+    Search:
+      name: search
+      in: query
+      description: Case-insensitive text search (names, titles, request numbers, emails)
+      schema: { type: string }
+    IsActive:
+      name: is_active
+      in: query
+      schema: { type: boolean }
+
+  responses:
+    BadRequest:
+      description: Validation failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { detail: 'title: This field is required.', code: validation, errors: { title: ['This field is required.'] } }
+    Unauthorized:
+      description: Missing, expired or revoked token
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { detail: 'Authentication credentials were not provided.', code: unauthorized }
+    Forbidden:
+      description: Signed in, but not allowed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { detail: 'You do not have permission to perform this action.', code: forbidden }
+    NotFound:
+      description: Does not exist, or the caller cannot see it
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { detail: 'Not found.', code: not_found }
+    Conflict:
+      description: A unique value is already taken
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { detail: 'That project code is already used', code: conflict, errors: { code: ['That project code is already used'] } }
+    InUse:
+      description: Still referenced; archive instead
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { detail: 'Project has requests, archive it instead', code: in_use }
+
+  schemas:
+    # ── Enums ──
+    Role:
+      type: string
+      enum: [employee, finance, general_manager, owner, admin]
+    RequestStatus:
+      type: string
+      enum: [draft, quote_received, awaiting_finance, awaiting_gm, awaiting_owner, approved, rejected, purchased, completed]
+    ApprovalStage:
+      type: string
+      enum: [finance, gm, owner]
+    ApprovalDecision:
+      type: string
+      enum: [pending, approved, rejected]
+    LaborStatus:
+      type: string
+      enum: [requested, reviewed, assigned, in_progress, completed, cancelled]
+    AttachmentType:
+      type: string
+      enum: [quotation, invoice, receipt, delivery, photo, other]
+    NotificationKind:
+      type: string
+      enum: [review, approved, rejected, returned, purchased, labor, reminder, comment, system]
+
+    Error:
+      type: object
+      required: [detail, code]
+      properties:
+        detail: { type: string, description: Human-readable sentence the UI shows as is }
+        code: { type: string, enum: [validation, unauthorized, forbidden, not_found, conflict, in_use] }
+        errors:
+          type: object
+          description: Field errors, DRF style
+          additionalProperties:
+            type: array
+            items: { type: string }
+
+    # ── Auth ──
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, example: finance@archops.demo }
+        password: { type: string, format: password }
+    TokenPair:
+      type: object
+      required: [access]
+      properties:
+        access: { type: string, description: 'Short-lived (e.g. 15 min)' }
+        refresh: { type: string, description: 'Long-lived (e.g. 7 days); rotated on refresh' }
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/TokenPair'
+        - type: object
+          required: [refresh, user]
+          properties:
+            user: { $ref: '#/components/schemas/User' }
+
+    # ── Users ──
+    User:
+      type: object
+      required: [id, email, full_name, role, department, avatar_initials]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        email: { type: string, format: email }
+        full_name: { type: string, example: Hana Bekele }
+        role: { $ref: '#/components/schemas/Role' }
+        department: { type: string, nullable: true, description: 'Department name (matches Department.name)', example: Architecture }
+        avatar_initials: { type: string, maxLength: 4, example: HB }
+        is_active: { type: boolean, readOnly: true }
+        date_joined: { type: string, format: date-time, readOnly: true }
+    MePatch:
+      type: object
+      properties:
+        full_name: { type: string, minLength: 1, maxLength: 150 }
+        avatar_initials: { type: string, maxLength: 4 }
+    UserPatch:
+      type: object
+      properties:
+        full_name: { type: string, minLength: 1, maxLength: 150 }
+        avatar_initials: { type: string, maxLength: 4 }
+        role: { $ref: '#/components/schemas/Role' }
+        department: { type: string, nullable: true }
+        is_active: { type: boolean }
+    UserCreate:
+      type: object
+      required: [email, full_name, password]
+      properties:
+        email: { type: string, format: email, example: hana@firm.com }
+        full_name: { type: string, minLength: 1, maxLength: 150, example: Hana Bekele }
+        password: { type: string, format: password, minLength: 8, description: 'Temporary password the admin shares; runs the Django password validators' }
+        role: { allOf: [{ $ref: '#/components/schemas/Role' }], default: employee }
+        department: { type: string, nullable: true }
+        avatar_initials: { type: string, maxLength: 4 }
+
+    # ── Reference data ──
+    Department:
+      type: object
+      required: [id, name, is_active, created_at, member_count]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, example: Architecture }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time, readOnly: true }
+        member_count: { type: integer, readOnly: true, example: 6 }
+    DepartmentInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        is_active: { type: boolean, default: true }
+
+    Project:
+      type: object
+      required: [id, name, code, client_name, location, budget, is_active, created_at, spent_amount]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, example: Riverside Office Renovation }
+        code: { type: string, description: 'Unique, upper case', example: RVS-01 }
+        client_name: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        budget: { type: number, nullable: true, minimum: 0, example: 250000 }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time, readOnly: true }
+        spent_amount: { type: number, readOnly: true, example: 48210.75 }
+    ProjectInput:
+      type: object
+      required: [name, code]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        code: { type: string, minLength: 1, maxLength: 40, description: Stored upper case }
+        client_name: { type: string, nullable: true }
+        location: { type: string, nullable: true }
+        budget: { type: number, nullable: true, minimum: 0 }
+        is_active: { type: boolean, default: true }
+
+    Vendor:
+      type: object
+      required: [id, name, contact_person, phone, email, services, address, is_active, created_at]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, example: Addis Build Supply }
+        contact_person: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        email: { type: string, format: email, nullable: true }
+        services: { type: string, nullable: true, description: 'Comma-separated list', example: 'Cement, Rebar, Blocks' }
+        address: { type: string, nullable: true }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time, readOnly: true }
+    VendorInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        contact_person: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        email: { type: string, format: email, nullable: true }
+        services: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        is_active: { type: boolean, default: true }
+
+    # ── Purchase requests ──
+    PurchaseItem:
+      type: object
+      required: [id, purchase_request_id, name, description, quantity, unit, estimated_unit_price]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        purchase_request_id: { type: string, format: uuid, readOnly: true }
+        name: { type: string, example: Portland cement 50kg }
+        description: { type: string, nullable: true }
+        quantity: { type: number, example: 120 }
+        unit: { type: string, example: bag }
+        estimated_unit_price: { type: number, nullable: true, example: 14.5 }
+        created_at: { type: string, format: date-time, readOnly: true }
+    PurchaseItemInput:
+      type: object
+      required: [name, quantity]
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string, nullable: true }
+        quantity: { type: number, exclusiveMinimum: true, minimum: 0 }
+        unit: { type: string, default: unit }
+        estimated_unit_price: { type: number, nullable: true, minimum: 0 }
+
+    VendorQuotation:
+      type: object
+      required: [id, purchase_request_id, vendor_id, vendor, amount, notes, valid_until, is_selected, created_at]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        purchase_request_id: { type: string, format: uuid, readOnly: true }
+        vendor_id: { type: string, format: uuid }
+        vendor: { $ref: '#/components/schemas/Vendor' }
+        amount: { type: number, example: 4250 }
+        notes: { type: string, nullable: true }
+        valid_until: { type: string, format: date, nullable: true }
+        is_selected: { type: boolean, readOnly: true }
+        created_at: { type: string, format: date-time, readOnly: true }
+    QuotationInput:
+      type: object
+      required: [vendor_id, amount]
+      properties:
+        vendor_id: { type: string, format: uuid }
+        amount: { type: number, exclusiveMinimum: true, minimum: 0 }
+        valid_until: { type: string, format: date, nullable: true }
+        notes: { type: string, nullable: true }
+
+    Approval:
+      type: object
+      required: [id, purchase_request_id, stage, decision, reviewer_id, reviewer, comments, decided_at]
+      properties:
+        id: { type: string, format: uuid }
+        purchase_request_id: { type: string, format: uuid }
+        stage: { $ref: '#/components/schemas/ApprovalStage' }
+        decision: { $ref: '#/components/schemas/ApprovalDecision' }
+        reviewer_id: { type: string, format: uuid, nullable: true }
+        reviewer: { type: object, nullable: true, allOf: [{ $ref: '#/components/schemas/User' }] }
+        comments: { type: string, nullable: true }
+        decided_at: { type: string, format: date-time, nullable: true }
+
+    Attachment:
+      type: object
+      required: [id, purchase_request_id, attachment_type, file_path, file_url, file_name, file_size, description, uploaded_by, uploaded_by_profile, uploaded_at]
+      properties:
+        id: { type: string, format: uuid }
+        purchase_request_id: { type: string, format: uuid }
+        attachment_type: { $ref: '#/components/schemas/AttachmentType' }
+        file_path: { type: string, description: 'Storage key, e.g. <request id>/<uuid>.pdf' }
+        file_url: { type: string, description: 'Same as file_path (kept for compatibility); open files via /attachments/{id}/download/' }
+        file_name: { type: string, description: 'Original file name', example: quote-addis-build.pdf }
+        file_size: { type: integer, nullable: true, description: Bytes }
+        description: { type: string, nullable: true }
+        uploaded_by: { type: string, format: uuid, nullable: true }
+        uploaded_by_profile: { type: object, nullable: true, allOf: [{ $ref: '#/components/schemas/User' }] }
+        uploaded_at: { type: string, format: date-time }
+
+    PurchaseRequest:
+      type: object
+      description: List shape (project and requester embedded)
+      required:
+        [id, request_number, title, description, project_id, project, department, requester_id, requester, required_date,
+         estimated_amount, approved_amount, actual_amount, justification, status, rejection_reason, return_note, submitted_at,
+         created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        request_number: { type: string, example: PR-2026-0013 }
+        title: { type: string, example: Site office furniture }
+        description: { type: string }
+        project_id: { type: string, format: uuid }
+        project: { $ref: '#/components/schemas/Project' }
+        department: { type: string, example: Architecture }
+        requester_id: { type: string, format: uuid }
+        requester: { $ref: '#/components/schemas/User' }
+        required_date: { type: string, format: date, nullable: true }
+        estimated_amount: { type: number, example: 4500 }
+        approved_amount: { type: number, nullable: true }
+        actual_amount: { type: number, nullable: true }
+        justification: { type: string }
+        status: { $ref: '#/components/schemas/RequestStatus' }
+        rejection_reason: { type: string, nullable: true }
+        return_note: { type: string, nullable: true, description: Set when an approver sent it back for changes }
+        submitted_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    PurchaseRequestDetail:
+      allOf:
+        - $ref: '#/components/schemas/PurchaseRequest'
+        - type: object
+          required: [items, quotations, approvals, attachments]
+          properties:
+            items:
+              type: array
+              items: { $ref: '#/components/schemas/PurchaseItem' }
+            quotations:
+              type: array
+              description: With `vendor` embedded
+              items: { $ref: '#/components/schemas/VendorQuotation' }
+            approvals:
+              type: array
+              description: Ordered finance, gm, owner
+              items: { $ref: '#/components/schemas/Approval' }
+            attachments:
+              type: array
+              description: Newest first, with `uploaded_by_profile`
+              items: { $ref: '#/components/schemas/Attachment' }
+    PurchaseRequestInput:
+      type: object
+      required: [title, project_id, department, estimated_amount]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, default: '' }
+        project_id: { type: string, format: uuid, description: Must be an active project }
+        department: { type: string, minLength: 1 }
+        estimated_amount: { type: number, minimum: 0 }
+        justification: { type: string, default: '' }
+        required_date: { type: string, format: date, nullable: true }
+    DecisionInput:
+      type: object
+      required: [decision]
+      properties:
+        decision: { type: string, enum: [approve, reject, return] }
+        comment: { type: string, nullable: true, description: Required for reject and return }
+        approved_amount: { type: number, nullable: true, minimum: 0, description: Approve only }
+
+    VendorRequestSummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        request_number: { type: string }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/RequestStatus' }
+        created_at: { type: string, format: date-time }
+        estimated_amount: { type: number }
+        approved_amount: { type: number, nullable: true }
+        actual_amount: { type: number, nullable: true }
+        project:
+          type: object
+          nullable: true
+          properties:
+            name: { type: string }
+    VendorQuoteRow:
+      type: object
+      required: [id, purchase_request_id, vendor_id, amount, notes, valid_until, is_selected, created_at, request, competing]
+      properties:
+        id: { type: string, format: uuid }
+        purchase_request_id: { type: string, format: uuid }
+        vendor_id: { type: string, format: uuid }
+        amount: { type: number }
+        notes: { type: string, nullable: true }
+        valid_until: { type: string, format: date, nullable: true }
+        is_selected: { type: boolean }
+        created_at: { type: string, format: date-time }
+        request: { $ref: '#/components/schemas/VendorRequestSummary' }
+        competing:
+          type: array
+          description: Amounts of every quote on the same request, this one included
+          items: { type: number }
+    VendorHistory:
+      type: object
+      required: [quotes, documents]
+      properties:
+        quotes:
+          type: array
+          items: { $ref: '#/components/schemas/VendorQuoteRow' }
+        documents:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/Attachment'
+              - type: object
+                properties:
+                  request:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      request_number: { type: string }
+                      title: { type: string }
+
+    # ── Labor ──
+    LaborRequest:
+      type: object
+      required:
+        [id, request_number, project_id, project, requested_by, requester, labor_type, workers_required, location, required_at,
+         description, status, assigned_to, expected_duration_hours, management_notes, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        request_number: { type: string, example: LR-2026-0004 }
+        project_id: { type: string, format: uuid }
+        project: { $ref: '#/components/schemas/Project' }
+        requested_by: { type: string, format: uuid }
+        requester: { $ref: '#/components/schemas/User' }
+        labor_type: { type: string, example: Masonry }
+        workers_required: { type: integer, minimum: 1, example: 6 }
+        location: { type: string, example: 'Block B, level 2' }
+        required_at: { type: string, format: date-time }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/LaborStatus' }
+        assigned_to: { type: string, nullable: true, description: Crew lead name }
+        expected_duration_hours: { type: number, nullable: true, description: 'Working hours (8 = a day, 40 = a week)' }
+        management_notes: { type: string, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LaborRequestInput:
+      type: object
+      required: [project_id, labor_type, workers_required, location, required_at]
+      properties:
+        project_id: { type: string, format: uuid }
+        labor_type: { type: string, minLength: 1 }
+        workers_required: { type: integer, minimum: 1, maximum: 500 }
+        location: { type: string, minLength: 1 }
+        required_at: { type: string, format: date-time }
+        description: { type: string, default: '' }
+        expected_duration_hours: { type: number, nullable: true, exclusiveMinimum: true, minimum: 0 }
+    LaborRequestPatch:
+      type: object
+      properties:
+        status: { $ref: '#/components/schemas/LaborStatus' }
+        assigned_to: { type: string, nullable: true }
+        management_notes: { type: string, nullable: true }
+
+    # ── Audit / notifications ──
+    AuditEvent:
+      type: object
+      required: [id, actor_id, actor, action, entity_type, entity_id, description, metadata, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        actor_id: { type: string, format: uuid, nullable: true, description: Null for system jobs }
+        actor: { type: object, nullable: true, allOf: [{ $ref: '#/components/schemas/User' }] }
+        action: { type: string, example: finance_approved }
+        entity_type: { type: string, example: purchase_request }
+        entity_id: { type: string }
+        description: { type: string, example: 'Finance approved "Site office furniture".' }
+        metadata: { type: object, additionalProperties: true, example: { approved_amount: 4300 } }
+        created_at: { type: string, format: date-time }
+    Notification:
+      type: object
+      required: [id, user_id, kind, title, body, link, is_read, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        kind: { $ref: '#/components/schemas/NotificationKind' }
+        title: { type: string, example: Site office furniture needs Finance review }
+        body: { type: string, example: '$4,500 for Architecture.' }
+        link: { type: string, example: /requests/7f6c2c1e-1b7b-4c1e-9a65-3f1b2d9c0a11 }
+        is_read: { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    # ── Pages ──
+    PageMeta:
+      type: object
+      required: [count, next, previous]
+      properties:
+        count: { type: integer, example: 42 }
+        next: { type: string, format: uri, nullable: true }
+        previous: { type: string, format: uri, nullable: true }
+    PaginatedUsers:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [results]
+          properties:
+            results: { type: array, items: { $ref: '#/components/schemas/User' } }
+    PaginatedDepartments:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [results]
+          properties:
+            results: { type: array, items: { $ref: '#/components/schemas/Department' } }
+    PaginatedProjects:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [results]
+          properties:
+            results: { type: array, items: { $ref: '#/components/schemas/Project' } }
+    PaginatedVendors:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [results]
+          properties:
+            results: { type: array, items: { $ref: '#/components/schemas/Vendor' } }
+    PaginatedPurchaseRequests:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [results]
+          properties:
+            results: { type: array, items: { $ref: '#/components/schemas/PurchaseRequest' } }
+    PaginatedLaborRequests:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [results]
+          properties:
+            results: { type: array, items: { $ref: '#/components/schemas/LaborRequest' } }
+    PaginatedAuditEvents:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [results]
+          properties:
+            results: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
+    PaginatedNotifications:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [results]
+          properties:
+            results: { type: array, items: { $ref: '#/components/schemas/Notification' } }
