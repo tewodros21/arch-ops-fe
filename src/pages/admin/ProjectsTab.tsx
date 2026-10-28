@@ -7,10 +7,11 @@ import { PROJECT_CREATED_EVENT } from '@/constants'
 import { notify } from '@/lib/notify'
 import { deleteProject, fetchAllProjects } from '@/services'
 import type { Project } from '@/types'
+import { formatCurrency } from '@/utils'
 import { ActivePill, EmptyCard, ListCard } from './shared'
 
 const TEMPLATE = 'md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.8fr)_6rem_5rem]'
-const money = (n: number) => `$${Math.round(n).toLocaleString()}`
+const money = (n: number) => formatCurrency(Math.round(n))
 
 export function ProjectsTab() {
   const confirm = useConfirm()

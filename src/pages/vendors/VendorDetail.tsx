@@ -8,10 +8,10 @@ import { useAuth } from '@/context/AuthContext'
 import { notify } from '@/lib/notify'
 import { openAttachment } from '@/lib/storage'
 import { fetchVendor, fetchVendorHistory, VENDOR_MANAGER_ROLES, type VendorHistory, type VendorQuoteRow } from '@/services'
-import { getInitials } from '@/utils'
+import { formatCurrency, getInitials } from '@/utils'
 import type { Vendor } from '@/types'
 
-const money = (n: number) => `$${Math.round(n).toLocaleString()}`
+const money = (n: number) => formatCurrency(Math.round(n))
 
 // How this quote compared with the others on the same request
 function priceHint(q: VendorQuoteRow): { label: string; tone: 'sun' | 'muted' | 'plain' } {
@@ -152,7 +152,7 @@ export function VendorDetail() {
                         </p>
                       </div>
                       <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end sm:gap-1">
-                        <span className="text-lg font-bold text-[var(--ink)]">${Number(q.amount).toLocaleString()}</span>
+                        <span className="text-lg font-bold text-[var(--ink)]">{formatCurrency(Number(q.amount))}</span>
                         <span
                           className={
                             hint.tone === 'sun'

@@ -68,7 +68,7 @@ export function ProjectFormModal({ project, onClose, onSaved }: { project: Proje
           <input id="pr-location" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Site address or city" className="field" />
         </Field>
       </div>
-      <Field label="Budget ($)" htmlFor="pr-budget" hint="Optional" error={errors.budget}>
+      <Field label="Budget (ETB)" htmlFor="pr-budget" hint="Optional" error={errors.budget}>
         <input
           id="pr-budget"
           type="number"

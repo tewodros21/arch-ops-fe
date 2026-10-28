@@ -5,6 +5,7 @@ import { Check, CircleDot, FilePlus2, HardHat, History, PackageCheck, Pencil, Sh
 import { Avatar, PageHeader } from '@/components/ui'
 import { fetchAuditLogs } from '@/services'
 import type { AuditEvent } from '@/types'
+import { formatCurrency } from '@/utils'
 
 type Kind = { icon: LucideIcon; bg: string; fg: string; label: string }
 
@@ -104,7 +105,7 @@ export function AuditLog() {
                           View labor request
                         </Link>
                       )}
-                      {amount != null && <span className="font-medium text-[var(--ink)]">${amount.toLocaleString()}</span>}
+                      {amount != null && <span className="font-medium text-[var(--ink)]">{formatCurrency(amount)}</span>}
                     </div>
                   </div>
                 </li>

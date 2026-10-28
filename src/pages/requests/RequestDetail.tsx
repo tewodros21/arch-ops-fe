@@ -28,12 +28,9 @@ import {
   selectQuotation,
 } from '@/services/requests'
 import { ATTACHMENT_TYPE_LABELS, ROLE_LABELS, type AttachmentType, type PurchaseAttachment, type PurchaseRequest, type Vendor } from '@/types'
+import { formatCurrency } from '@/utils'
 
 const EMPTY_QUOTE = { vendor_id: '', amount: '', valid_until: '', notes: '' }
-
-function usd(value: number | string | null | undefined) {
-  return `$${Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
-}
 
 export function RequestDetail() {
   const { id } = useParams()
@@ -186,7 +183,7 @@ export function RequestDetail() {
         <>
           {canSetAmount && (
             <>
-              Approving <strong className="font-semibold text-[var(--ink)]">{usd(amount)}</strong>.{' '}
+              Approving <strong className="font-semibold text-[var(--ink)]">{formatCurrency(amount)}</strong>.{' '}
             </>
           )}
           It moves on to {nextStep}.
@@ -236,8 +233,8 @@ export function RequestDetail() {
       title: 'Record this purchase?',
       body: (
         <>
-          <strong className="font-semibold text-[var(--ink)]">{usd(amount)}</strong> paid
-          {req.approved_amount != null && <> against {usd(req.approved_amount)} approved</>}. The request is marked as purchased.
+          <strong className="font-semibold text-[var(--ink)]">{formatCurrency(amount)}</strong> paid
+          {req.approved_amount != null && <> against {formatCurrency(req.approved_amount)} approved</>}. The request is marked as purchased.
         </>
       ),
       confirmLabel: 'Record purchase',
@@ -362,12 +359,12 @@ export function RequestDetail() {
           </div>
           <div className="sm:text-right">
             <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">{headline.label}</p>
-            <p className="text-[clamp(2.2rem,5vw,3.5rem)] leading-none font-black tracking-tight text-[var(--ink)]">{usd(headline.value)}</p>
+            <p className="text-[clamp(2.2rem,5vw,3.5rem)] leading-none font-black tracking-tight text-[var(--ink)]">{formatCurrency(headline.value)}</p>
             {amounts.length > 1 && (
               <p className="mt-1 text-xs text-slate-500">
                 {amounts
                   .slice(0, -1)
-                  .map((a) => `${a.label} ${usd(a.value)}`)
+                  .map((a) => `${a.label} ${formatCurrency(a.value)}`)
                   .join(' · ')}
               </p>
             )}
@@ -430,7 +427,7 @@ export function RequestDetail() {
                 <div className="hidden grid-cols-[minmax(0,1fr)_6rem_7rem_7rem] gap-3 px-4 pb-2 text-xs font-medium tracking-wide text-slate-500 uppercase sm:grid">
                   <span>Item</span>
                   <span className="text-right">Qty</span>
-                  <span className="text-right">Unit price</span>
+                  <span className="text-right">Unit price (ETB)</span>
                   <span className="text-right">Total</span>
                 </div>
                 <ul className="space-y-2">
@@ -446,16 +443,16 @@ export function RequestDetail() {
                           {item.description && <p className="truncate text-xs text-slate-500">{item.description}</p>}
                           <p className="text-xs text-slate-500 sm:hidden">
                             {Number(item.quantity).toLocaleString()} {item.unit}
-                            {item.estimated_unit_price != null && ` × ${usd(item.estimated_unit_price)}`}
+                            {item.estimated_unit_price != null && ` × ${formatCurrency(item.estimated_unit_price)}`}
                           </p>
                         </div>
                         <span className="hidden text-right text-sm text-[var(--ink-soft)] sm:block">
                           {Number(item.quantity).toLocaleString()} {item.unit}
                         </span>
                         <span className="hidden text-right text-sm text-[var(--ink-soft)] sm:block">
-                          {item.estimated_unit_price != null ? usd(item.estimated_unit_price) : '—'}
+                          {item.estimated_unit_price != null ? formatCurrency(item.estimated_unit_price) : '—'}
                         </span>
-                        <span className="text-right text-sm font-bold text-[var(--ink)]">{total > 0 ? usd(total) : '—'}</span>
+                        <span className="text-right text-sm font-bold text-[var(--ink)]">{total > 0 ? formatCurrency(total) : '—'}</span>
                       </li>
                     )
                   })}
@@ -463,9 +460,9 @@ export function RequestDetail() {
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-black/[0.06] px-4 pt-3">
                   <span className="text-sm text-[var(--ink-soft)]">
                     Items total
-                    {itemsTotal > 0 && Math.abs(itemsTotal - Number(req.estimated_amount)) > 0.005 && ` · estimate ${usd(req.estimated_amount)}`}
+                    {itemsTotal > 0 && Math.abs(itemsTotal - Number(req.estimated_amount)) > 0.005 && ` · estimate ${formatCurrency(req.estimated_amount)}`}
                   </span>
-                  <span className="text-xl font-black tracking-tight text-[var(--ink)]">{usd(itemsTotal)}</span>
+                  <span className="text-xl font-black tracking-tight text-[var(--ink)]">{formatCurrency(itemsTotal)}</span>
                 </div>
               </>
             )}
@@ -524,10 +521,10 @@ export function RequestDetail() {
                           </Button>
                         )}
                         <div className="text-right">
-                          <p className="text-lg leading-tight font-bold text-[var(--ink)]">{usd(q.amount)}</p>
+                          <p className="text-lg leading-tight font-bold text-[var(--ink)]">{formatCurrency(q.amount)}</p>
                           {quotes.length > 1 && diff > 0 && (
                             <p className="text-[11px] text-slate-500">
-                              +{usd(diff)} ({Math.round((diff / (lowest || 1)) * 100)}%)
+                              +{formatCurrency(diff)} ({Math.round((diff / (lowest || 1)) * 100)}%)
                             </p>
                           )}
                         </div>
@@ -733,7 +730,7 @@ export function RequestDetail() {
                 <input
                   value={purchaseAmount}
                   onChange={(e) => setPurchaseAmount(e.target.value)}
-                  placeholder={`Actual amount paid (${usd(req.approved_amount ?? req.estimated_amount)} approved)`}
+                  placeholder={`Actual amount paid (${formatCurrency(req.approved_amount ?? req.estimated_amount)} approved)`}
                   type="number"
                   inputMode="decimal"
                   min="0"
