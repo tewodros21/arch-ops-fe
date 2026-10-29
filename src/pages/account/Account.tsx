@@ -84,10 +84,11 @@ export function Account() {
             <p className="mt-1 truncate text-sm text-[var(--ink-soft)]">{profile.email}</p>
           </div>
         </div>
-        <div className="mt-6 grid grid-cols-2 gap-4 border-t border-black/[0.06] pt-6 md:grid-cols-3">
+        <div className="mt-6 grid grid-cols-2 gap-4 border-t border-black/[0.06] pt-6 md:grid-cols-4">
           <Meta label="Role">{ROLE_LABELS[profile.role]}</Meta>
           <Meta label="Department">{profile.department || 'Not set'}</Meta>
           <Meta label="Email">{profile.email}</Meta>
+          <Meta label="Account status">{profile.is_active ? 'Active' : 'Inactive'}</Meta>
         </div>
       </section>
 

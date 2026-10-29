@@ -34,7 +34,13 @@ export function Login() {
     setLoading(true)
     const { error } = await signIn(email, password)
     setLoading(false)
-    if (error) notify.error(`Sign in failed: ${error}`)
+    if (error) {
+      notify.error(
+        error.code === 'account_deactivated'
+          ? 'Your account has been deactivated. Contact an administrator to restore access.'
+          : `Sign in failed: ${error.message}`,
+      )
+    }
     else notify.success('Welcome back, you are now signed in')
   }
 
@@ -42,7 +48,13 @@ export function Login() {
     setQuickRole(roleEmail)
     const { error } = await signIn(roleEmail, DEMO_PASSWORD)
     setQuickRole(null)
-    if (error) notify.error(`Demo sign in failed: ${error}`)
+    if (error) {
+      notify.error(
+        error.code === 'account_deactivated'
+          ? 'Your account has been deactivated. Contact an administrator to restore access.'
+          : `Demo sign in failed: ${error.message}`,
+      )
+    }
     else notify.success('Signed in to the demo workspace')
   }
 
