@@ -7,6 +7,7 @@ import { EDITABLE_STATUSES } from '@/lib/workflow'
 import { fetchPurchaseRequests, PURCHASE_SAVED_EVENT } from '@/services/requests'
 import { Avatar, PageHeader, StatusBadge } from '@/components/ui'
 import type { PurchaseRequest, RequestStatus } from '@/types'
+import { formatCurrency } from '@/utils'
 
 const FILTERS: { key: string; label: string; statuses: RequestStatus[] | null }[] = [
   { key: 'all', label: 'All', statuses: null },
@@ -77,7 +78,7 @@ export function RequestList() {
       <PageHeader
         title="Purchase requests"
         count={filtered.length}
-        subtitle={`$${Math.round(total).toLocaleString()} estimated across ${filtered.length} request${filtered.length === 1 ? '' : 's'}`}
+        subtitle={`${formatCurrency(Math.round(total))} estimated across ${filtered.length} request${filtered.length === 1 ? '' : 's'}`}
       />
 
       <div className="flex flex-col gap-3">
@@ -144,7 +145,7 @@ export function RequestList() {
                     {r.requester && <Avatar initials={r.requester.avatar_initials} index={r.requester.full_name.length} size={28} />}
                     <span className="truncate text-sm text-[var(--ink-soft)]">{r.requester?.full_name}</span>
                   </div>
-                  <p className="text-right text-base font-bold text-[var(--ink)]">${Number(r.estimated_amount).toLocaleString()}</p>
+                  <p className="text-right text-base font-bold text-[var(--ink)]">{formatCurrency(Number(r.estimated_amount))}</p>
                   <div className="hidden lg:block">
                     <StatusBadge status={r.status} />
                   </div>

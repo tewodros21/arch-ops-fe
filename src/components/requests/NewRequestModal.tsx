@@ -7,6 +7,7 @@ import { notify } from '@/lib/notify'
 import { ACCEPT_ATTR, formatBytes, validateFile } from '@/lib/storage'
 import { EDITABLE_STATUSES, submitRequest } from '@/lib/workflow'
 import { useAuth } from '@/context/AuthContext'
+import { formatCurrency } from '@/utils'
 import { ReviewTile, StepField as Field, StepModal, type Step } from '@/components/ui/StepModal'
 import {
   addQuotation,
@@ -56,7 +57,7 @@ const inputClass =
 
 function money(value: string | number) {
   const n = Number(value)
-  return Number.isFinite(n) && n > 0 ? `$${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : '—'
+  return Number.isFinite(n) && n > 0 ? formatCurrency(n) : '—'
 }
 
 // A row counts once any field differs from the blank template
@@ -512,7 +513,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
 
       {!loadingEdit && step === 2 && (
         <>
-          <Field label="Estimated amount" error={err(2, !(estimate > 0))}>
+          <Field label="Estimated amount (ETB)" error={err(2, !(estimate > 0))}>
             <div
               className={clsx(
                 'flex items-center gap-2 rounded-[1.5rem] border bg-[var(--canvas)] px-5 py-4 transition-colors focus-within:border-[var(--ink)] focus-within:bg-white',

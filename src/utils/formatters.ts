@@ -4,13 +4,14 @@ export function cn(...inputs: ClassValue[]) {
   return clsx(inputs)
 }
 
-export function formatCurrency(amount: number | null | undefined, currency = 'USD'): string {
-  if (amount == null) return '$0.00'
-  return new Intl.NumberFormat('en-US', {
+export function formatCurrency(amount: number | null | undefined, currency = 'ETB'): string {
+  return new Intl.NumberFormat('en-ET', {
     style: 'currency',
     currency,
-    minimumFractionDigits: 2,
-  }).format(amount)
+    currencyDisplay: 'code',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount ?? 0)
 }
 
 export function formatDate(dateString: string | null | undefined): string {

@@ -1,11 +1,11 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
-import { backend } from '@/api'
+import { backend, type ApiError } from '@/api'
 import type { Profile } from '@/types'
 
 interface AuthState {
   profile: Profile | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
+  signIn: (email: string, password: string) => Promise<{ error: ApiError | null }>
   signOut: () => Promise<void>
   /** Re-reads the signed-in profile after it was edited (name, role, department) */
   refreshProfile: () => Promise<void>
@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signIn(email: string, password: string) {
     const { error } = await backend.auth.signIn(email, password)
-    return { error: error?.message ?? null }
+    return { error }
   }
 
   async function signOut() {

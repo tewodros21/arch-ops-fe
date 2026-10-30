@@ -18,7 +18,7 @@ import type {
 // src/services, so screens never call the Django REST API (public/docs/openapi.yaml) directly.
 
 /** Normalized so the UI can react to a cause without knowing HTTP codes */
-export type ErrorCode = 'validation' | 'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'in_use' | 'network' | 'unknown'
+export type ErrorCode = 'validation' | 'unauthorized' | 'account_deactivated' | 'forbidden' | 'not_found' | 'conflict' | 'in_use' | 'network' | 'unknown'
 
 export interface ApiError {
   message: string
@@ -63,6 +63,7 @@ export interface ProfilePatch {
   avatar_initials?: string
   role?: Role
   department?: string | null
+  is_active?: boolean
 }
 
 /** An admin adding a teammate; they sign in with the temporary password and change it on their Account page */

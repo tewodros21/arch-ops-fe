@@ -120,11 +120,15 @@ paths:
               schema: { $ref: '#/components/schemas/LoginResponse' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401':
-          description: Wrong email or password, or the account is inactive
+          description: Invalid credentials or a deactivated account
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
-              example: { detail: 'Email or password is incorrect', code: unauthorized }
+              examples:
+                invalidCredentials:
+                  value: { detail: 'Email or password is incorrect', code: unauthorized }
+                accountDeactivated:
+                  value: { detail: 'Your account has been deactivated. Contact an administrator to restore access.', code: account_deactivated }
 
   /auth/refresh/:
     post:
@@ -1239,7 +1243,7 @@ components:
       required: [detail, code]
       properties:
         detail: { type: string, description: Human-readable sentence the UI shows as is }
-        code: { type: string, enum: [validation, unauthorized, forbidden, not_found, conflict, in_use] }
+        code: { type: string, enum: [validation, unauthorized, account_deactivated, forbidden, not_found, conflict, in_use] }
         errors:
           type: object
           description: Field errors, DRF style

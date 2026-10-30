@@ -121,7 +121,7 @@ async function send(method: string, url: string, opts: Options) {
 }
 
 const STATUS_CODES: Record<number, ErrorCode> = { 400: 'validation', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 409: 'conflict' }
-const KNOWN_CODES = new Set<ErrorCode>(['validation', 'unauthorized', 'forbidden', 'not_found', 'conflict', 'in_use'])
+const KNOWN_CODES = new Set<ErrorCode>(['validation', 'unauthorized', 'account_deactivated', 'forbidden', 'not_found', 'conflict', 'in_use'])
 
 /** Reads { detail, code, errors } (the documented shape) and plain DRF field-error bodies */
 async function parseError(res: Response): Promise<ApiError> {
