@@ -42,11 +42,11 @@ info:
     | `owner` | Stage 3 (final) approval; record purchases; manage vendors, projects, departments; read audit log |
     | `admin` | Everything except approving; manage users and roles |
 
-    Nobody may approve their own request. Only admins change roles.
+    A requester's own approval stage is skipped; nobody may approve their own request. Only admins change roles.
 
     ## Purchase request workflow
     ```
-    draft ──(add quote)──▶ quote_received ──submit──▶ awaiting_finance ──approve──▶ awaiting_gm ──approve──▶ awaiting_owner ──approve──▶ approved
+    draft ──(add quote)──▶ quote_received ──submit──▶ first eligible approval stage ──approve──▶ … ──approve──▶ approved
                                   ▲                        │  │                        │  │                        │  │
                                   └──────── return ────────┘  └────── reject ──────────┴──┴────────────────────────┘  └──▶ rejected
     approved ──record-purchase──▶ purchased ──complete──▶ completed
@@ -60,7 +60,7 @@ info:
     | Event | Audit `action` | Notify |
     |---|---|---|
     | Purchase request created / edited | `purchase_created` / `purchase_updated` | — |
-    | Submitted | `purchase_submitted` | all `finance` users (kind `review`); requester (`system`) |
+    | Submitted | `purchase_submitted` | first eligible reviewer role (`review`); requester (`system`, unless they submitted it) |
     | Finance approves | `finance_approved` | all `general_manager` (`review`); requester (`approved`) |
     | GM approves | `gm_approved` | all `owner` (`review`); requester (`approved`) |
     | Owner approves | `owner_approved` | requester (`approved`); all `finance` (`purchased`, ready to buy) |
@@ -744,9 +744,10 @@ paths:
       tags: [Purchase workflow]
       summary: Submit for Finance review
       description: |
-        `draft` / `quote_received` → `awaiting_finance`. Requester (or admin) only; needs at least one quotation.
-        Sets `submitted_at`, clears `return_note` / `rejection_reason`, and restarts the approval chain with one
-        pending `finance` approval.
+        Requester (or admin) only; needs at least one quotation. Starts at the first approval stage not owned by the
+        requester (`finance`, `general_manager`, then `owner`); a requester's own stage is skipped. Sets
+        `submitted_at`, clears `return_note` / `rejection_reason`, and restarts the approval chain with one pending
+        approval.
       operationId: purchaseSubmit
       responses:
         '200':
