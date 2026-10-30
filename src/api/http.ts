@@ -53,14 +53,19 @@ export function refreshToken() {
 
 /** Stores (or clears) the token pair and tells listeners when the signed-in state flips */
 export function setTokens(tokens: Tokens | null) {
-  const wasSignedIn = hasSession()
+  const previous = readTokens()
+  const wasSignedIn = !!previous
   try {
     if (tokens) localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens))
     else localStorage.removeItem(TOKEN_KEY)
   } catch {
     // Storage blocked (private mode): the session lasts until reload
   }
-  if (wasSignedIn !== !!tokens) listeners.forEach((l) => l(!!tokens))
+  const signedIn = !!tokens
+  // Also notify when switching accounts while tokens were already present (stale/expired session)
+  if (wasSignedIn !== signedIn || (tokens != null && previous?.access !== tokens.access)) {
+    listeners.forEach((l) => l(signedIn))
+  }
 }
 
 export function onSessionChange(listener: (signedIn: boolean) => void) {
@@ -68,6 +73,14 @@ export function onSessionChange(listener: (signedIn: boolean) => void) {
   return () => {
     listeners.delete(listener)
   }
+}
+
+// Other tabs share the same localStorage session. Reload so this tab picks up
+// a sign-in, sign-out, or account switch without serving the previous user's UI.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === TOKEN_KEY) window.location.reload()
+  })
 }
 
 // Concurrent 401s share one refresh call

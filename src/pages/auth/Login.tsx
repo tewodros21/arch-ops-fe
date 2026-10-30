@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { notify } from '@/lib/notify'
 import { ArrowRight, Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -21,6 +21,7 @@ const inputClass =
 
 export function Login() {
   const { signIn, profile } = useAuth()
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -34,16 +35,24 @@ export function Login() {
     setLoading(true)
     const { error } = await signIn(email, password)
     setLoading(false)
-    if (error) notify.error(`Sign in failed: ${error}`)
-    else notify.success('Welcome back, you are now signed in')
+    if (error) {
+      notify.error(`Sign in failed: ${error}`)
+      return
+    }
+    notify.success('Welcome back, you are now signed in')
+    navigate('/dashboard', { replace: true })
   }
 
   async function handleQuickLogin(roleEmail: string) {
     setQuickRole(roleEmail)
     const { error } = await signIn(roleEmail, DEMO_PASSWORD)
     setQuickRole(null)
-    if (error) notify.error(`Demo sign in failed: ${error}`)
-    else notify.success('Signed in to the demo workspace')
+    if (error) {
+      notify.error(`Demo sign in failed: ${error}`)
+      return
+    }
+    notify.success('Signed in to the demo workspace')
+    navigate('/dashboard', { replace: true })
   }
 
   const busy = loading || quickRole !== null

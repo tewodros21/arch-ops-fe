@@ -219,7 +219,17 @@ export function RequestDetail() {
       input: { label: 'What needs to change?', placeholder: 'e.g. Add a second vendor quote', required: true },
     })
     if (note === null) return
-    await run('return', () => returnToRequester(req.id, note), 'Sent back to the requester for changes', 'Could not send this request back')
+    setBusy('return')
+    const { error } = await returnToRequester(req.id, note)
+    setBusy(null)
+    if (error) {
+      notify.error(`Could not send this request back: ${error}`)
+      return
+    }
+    notify.success('Sent back to the requester for changes')
+    // quote_received is only visible to the requester; leave the detail page
+    // so Finance/GM/Owner do not land on "Request not found".
+    navigate('/requests')
   }
 
   async function handleRecordPurchase() {
