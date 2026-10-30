@@ -20,6 +20,7 @@ export interface Profile {
   full_name: string
   role: Role
   department: string | null
+  is_active: boolean
   avatar_initials: string
 }
 

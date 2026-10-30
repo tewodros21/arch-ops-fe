@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Plus, Search, UserCog, UserPlus, Users } from 'lucide-react'
+import { Pencil, Plus, Power, Search, UserCog, UserPlus, Users } from 'lucide-react'
 import { Avatar, useConfirm } from '@/components/ui'
 import { Field, FormModal } from '@/components/admin/FormModal'
 import { NEW_USER_SEARCH, USER_CREATED_EVENT } from '@/constants'
@@ -14,9 +14,11 @@ import { EmptyCard, ListCard } from './shared'
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
 
 export function UsersTab() {
+  const { profile: me } = useAuth()
   const [people, setPeople] = useState<Profile[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [loading, setLoading] = useState(true)
+  const [updatingIds, setUpdatingIds] = useState<string[]>([])
   const [role, setRole] = useState<Role | null>(null)
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Profile | null>(null)
@@ -42,6 +44,27 @@ export function UsersTab() {
       (!role || p.role === role) &&
       (!q || p.full_name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q) || (p.department ?? '').toLowerCase().includes(q)),
   )
+
+  async function toggleActive(person: Profile) {
+    const isActive = !person.is_active
+    setUpdatingIds((ids) => [...ids, person.id])
+    try {
+      const { data, error } = await updateProfile(person.id, { is_active: isActive })
+      if (error || !data) {
+        notify.error(
+          error?.code === 'forbidden'
+            ? 'You do not have permission to change this account.'
+            : `Could not ${isActive ? 'activate' : 'deactivate'} this account: ${error?.message ?? 'Unknown error'}`,
+        )
+        return
+      }
+
+      setPeople((list) => list.map((item) => (item.id === person.id ? { ...item, ...data, is_active: isActive } : item)))
+      notify.success(`${person.full_name} was ${isActive ? 'activated' : 'deactivated'}`)
+    } finally {
+      setUpdatingIds((ids) => ids.filter((id) => id !== person.id))
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -86,9 +109,9 @@ export function UsersTab() {
       ) : filtered.length === 0 ? (
         <EmptyCard icon={Users} title="Nobody matches" />
       ) : (
-        <ListCard columns={['Person', 'Role', 'Department', '']} template="md:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1fr)_2.5rem]">
+        <ListCard columns={['Person', 'Role', 'Department', 'Status', '']} template="md:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto]">
           {filtered.map((p, i) => (
-            <li key={p.id} className="flex items-center gap-3 rounded-2xl px-3 py-3 transition-colors hover:bg-[var(--canvas)] md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1fr)_2.5rem] md:gap-4">
+            <li key={p.id} className="flex items-center gap-3 rounded-2xl px-3 py-3 transition-colors hover:bg-[var(--canvas)] md:grid md:grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto] md:gap-4">
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <Avatar initials={p.avatar_initials} index={i} size={40} />
                 <div className="min-w-0">
@@ -104,13 +127,29 @@ export function UsersTab() {
                 <RolePill role={p.role} />
               </div>
               <p className="hidden truncate text-sm text-[var(--ink-soft)] md:block">{p.department || '—'}</p>
-              <button
-                onClick={() => setEditing(p)}
-                aria-label={`Edit ${p.full_name}`}
-                className="focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 text-[var(--ink)] hover:bg-white"
-              >
-                <Pencil size={15} />
-              </button>
+              <UserStatusPill active={p.is_active} />
+              <div className="flex shrink-0 items-center gap-2">
+                {me?.role === 'admin' && p.role !== 'admin' && (
+                  <button
+                    type="button"
+                    onClick={() => toggleActive(p)}
+                    disabled={updatingIds.includes(p.id)}
+                    aria-label={`${p.is_active ? 'Deactivate' : 'Activate'} ${p.full_name}`}
+                    className="focus-ring inline-flex h-9 items-center gap-1.5 rounded-full border border-black/10 px-3 text-xs font-semibold text-[var(--ink)] hover:bg-white disabled:cursor-wait disabled:opacity-50"
+                  >
+                    <Power size={14} />
+                    {p.is_active ? 'Deactivate' : 'Activate'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setEditing(p)}
+                  aria-label={`Edit ${p.full_name}`}
+                  className="focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 text-[var(--ink)] hover:bg-white"
+                >
+                  <Pencil size={15} />
+                </button>
+              </div>
             </li>
           ))}
         </ListCard>
@@ -125,6 +164,19 @@ export function UsersTab() {
         />
       )}
     </div>
+  )
+}
+
+function UserStatusPill({ active }: { active: boolean }) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
+        active ? 'bg-[#d3efdf] text-[#1e8c66]' : 'bg-[var(--canvas)] text-slate-500'
+      }`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-[#1e8c66]' : 'bg-slate-400'}`} />
+      {active ? 'Active' : 'Inactive'}
+    </span>
   )
 }
 

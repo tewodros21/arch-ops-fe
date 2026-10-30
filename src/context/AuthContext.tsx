@@ -1,12 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
-import { backend } from '@/api'
+import { backend, type ApiError } from '@/api'
 import type { Profile } from '@/types'
 
 interface AuthState {
   profile: Profile | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>
+  signIn: (email: string, password: string) => Promise<{ error: ApiError | null }>
   signOut: () => Promise<void>
   /** Re-reads the signed-in profile after it was edited (name, role, department) */
   refreshProfile: () => Promise<void>
@@ -36,13 +36,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signIn(email: string, password: string) {
     const { error } = await backend.auth.signIn(email, password)
-    if (error) return { error: error.message }
+    if (error) return { error }
     // Load profile and commit it before Login navigates, so ProtectedRoute
     // already sees the user (stale tokens used to skip the session listener).
     const me = await backend.auth.me()
     if (!me) {
       await backend.auth.signOut()
-      return { error: 'Could not load your profile' }
+      return { error: { message: 'Could not load your profile', code: 'unknown' as const } }
     }
     flushSync(() => setProfile(me))
     return { error: null }
