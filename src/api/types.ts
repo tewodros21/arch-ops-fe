@@ -18,7 +18,18 @@ import type {
 // src/services, so screens never call the Django REST API (public/docs/openapi.yaml) directly.
 
 /** Normalized so the UI can react to a cause without knowing HTTP codes */
-export type ErrorCode = 'validation' | 'unauthorized' | 'account_deactivated' | 'forbidden' | 'not_found' | 'conflict' | 'in_use' | 'network' | 'unknown'
+export type ErrorCode =
+  | 'validation'
+  | 'unauthorized'
+  | 'account_deactivated'
+  | 'forbidden'
+  | 'not_found'
+  | 'conflict'
+  | 'in_use'
+  | 'sent_back'
+  | 'with_requester'
+  | 'network'
+  | 'unknown'
 
 export interface ApiError {
   message: string

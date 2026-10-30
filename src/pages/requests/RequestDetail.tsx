@@ -23,9 +23,10 @@ import {
   addQuotation,
   deletePurchaseRequest,
   fetchActiveVendors,
-  fetchPurchaseRequestById,
+  loadPurchaseRequest,
   PURCHASE_SAVED_EVENT,
   selectQuotation,
+  type PurchaseUnavailable,
 } from '@/services/requests'
 import { ATTACHMENT_TYPE_LABELS, ROLE_LABELS, type AttachmentType, type PurchaseAttachment, type PurchaseRequest, type Vendor } from '@/types'
 import { formatCurrency } from '@/utils'
@@ -38,6 +39,8 @@ export function RequestDetail() {
   const navigate = useNavigate()
   const confirm = useConfirm()
   const [request, setRequest] = useState<PurchaseRequest | null>(null)
+  const [unavailable, setUnavailable] = useState<PurchaseUnavailable | null>(null)
+  const [unavailableMessage, setUnavailableMessage] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   // Which action is running, so only that button spins
   const [busy, setBusy] = useState<string | null>(null)
@@ -54,7 +57,17 @@ export function RequestDetail() {
   const [quoteBusy, setQuoteBusy] = useState(false)
 
   async function load() {
-    setRequest(id ? await fetchPurchaseRequestById(id) : null)
+    if (!id) {
+      setRequest(null)
+      setUnavailable('missing')
+      setUnavailableMessage(null)
+      setLoading(false)
+      return
+    }
+    const result = await loadPurchaseRequest(id)
+    setRequest(result.data)
+    setUnavailable(result.unavailable)
+    setUnavailableMessage(result.message)
     setLoading(false)
   }
 
@@ -71,15 +84,29 @@ export function RequestDetail() {
   }, [id])
 
   if (loading) return <p className="py-16 text-center text-sm text-slate-500">Loading request…</p>
-  if (!request)
+  if (!request) {
+    const title =
+      unavailable === 'sent_back'
+        ? 'This purchase was sent back'
+        : unavailable === 'with_requester'
+          ? 'This purchase is with the requester'
+          : 'Request not found'
+    const body =
+      unavailable === 'sent_back'
+        ? unavailableMessage || 'The requester can edit and resubmit. It will come back to Finance when they are ready.'
+        : unavailable === 'with_requester'
+          ? unavailableMessage || 'Only the requester can open it while it is a draft or waiting on quote changes.'
+          : 'This purchase request could not be opened.'
     return (
       <div className="rounded-[1.75rem] bg-white px-6 py-16 text-center">
-        <p className="text-2xl font-black text-[var(--ink)]">Request not found</p>
-        <Link to="/requests" className="mt-3 inline-block text-sm font-medium text-[var(--accent)] underline underline-offset-4">
+        <p className="text-2xl font-black text-[var(--ink)]">{title}</p>
+        <p className="mx-auto mt-3 max-w-md text-sm text-slate-500">{body}</p>
+        <Link to="/requests" className="mt-5 inline-block text-sm font-medium text-[var(--accent)] underline underline-offset-4">
           Back to requests
         </Link>
       </div>
     )
+  }
 
   const req = request
   const role = profile?.role
@@ -227,9 +254,10 @@ export function RequestDetail() {
       return
     }
     notify.success('Sent back to the requester for changes')
-    // quote_received is only visible to the requester; leave the detail page
-    // so Finance/GM/Owner do not land on "Request not found".
-    navigate('/requests')
+    // Show the sent-back screen instead of treating the hidden request as an error
+    setRequest(null)
+    setUnavailable('sent_back')
+    setUnavailableMessage('This purchase was sent back to the requester for changes.')
   }
 
   async function handleRecordPurchase() {
