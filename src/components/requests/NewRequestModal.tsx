@@ -42,7 +42,12 @@ interface QuotationRow {
 
 const EMPTY_ITEM: ItemRow = { name: '', quantity: '1', unit: 'unit', unit_price: '', description: '' }
 const EMPTY_QUOTATION: QuotationRow = { vendor_id: '', amount: '', valid_until: '', notes: '', file: null }
-const UNITS = ['unit', 'pcs', 'box', 'set', 'm', 'm²', 'm³', 'kg', 'ton', 'litre', 'hour', 'day']
+const UNITS = [
+  'unit', 'each', 'pcs', 'pair', 'pack', 'set', 'box', 'bag', 'sack', 'bucket', 'drum',
+  'm', 'cm', 'mm', 'm²', 'm³', 'ft', 'roll', 'sheet', 'board', 'length', 'bundle', 'pallet', 'load',
+  'brick', 'block', 'tile', 'kg', 'g', 'ton', 'litre', 'mL',
+  'hour', 'day', 'week', 'month', 'year', 'service', 'lot', 'license', 'seat',
+]
 
 const STEPS: Step[] = [
   { title: 'Details', hint: 'What you need and for which project' },
