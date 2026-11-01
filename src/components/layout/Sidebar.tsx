@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { ChevronRight, LogOut, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
-import { fetchTeamMembers } from '@/services'
+import { fetchTeam } from '@/services'
 import { useAuth } from '@/context/AuthContext'
 import { Avatar } from '@/components/ui'
 import { notify } from '@/lib/notify'
+import { USER_CREATED_EVENT } from '@/constants'
 import { ROLE_LABELS, type Profile } from '@/types'
 import { navFor } from './nav'
 
@@ -48,10 +49,28 @@ function SidebarPanel({ collapsed, onToggle, onClose }: { collapsed: boolean; on
   const { profile, signOut } = useAuth()
   const navigate = useNavigate()
   const [team, setTeam] = useState<Profile[]>([])
+  const [teamExpanded, setTeamExpanded] = useState(false)
 
   useEffect(() => {
-    fetchTeamMembers(6).then(setTeam)
-  }, [])
+    let active = true
+
+    async function loadTeam() {
+      const { data, error } = await fetchTeam(teamExpanded ? undefined : 6)
+      if (!active) return
+      if (error) {
+        notify.error(`Could not load team members: ${error.message}`)
+        return
+      }
+      setTeam(data ?? [])
+    }
+
+    void loadTeam()
+    window.addEventListener(USER_CREATED_EVENT, loadTeam)
+    return () => {
+      active = false
+      window.removeEventListener(USER_CREATED_EVENT, loadTeam)
+    }
+  }, [teamExpanded])
 
   if (!profile) return null
 
@@ -119,13 +138,19 @@ function SidebarPanel({ collapsed, onToggle, onClose }: { collapsed: boolean; on
         {!collapsed && (
           <>
             <div className="my-4 border-t border-white/10" />
-            <div className="mb-3 flex items-center justify-between px-2">
-              <p className="text-sm font-medium text-white">Team members</p>
+            <button
+              type="button"
+              onClick={() => setTeamExpanded((expanded) => !expanded)}
+              aria-expanded={teamExpanded}
+              aria-controls="sidebar-team-members"
+              className="mb-3 flex w-full items-center justify-between rounded-xl px-2 py-1 text-left hover:bg-white/5"
+            >
+              <span className="text-sm font-medium text-white">Team members</span>
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/10 text-white/70">
-                <ChevronRight size={14} />
+                <ChevronRight size={14} className={clsx('transition-transform', teamExpanded && 'rotate-90')} />
               </span>
-            </div>
-            <ul className="space-y-3 px-2 pb-4">
+            </button>
+            <ul id="sidebar-team-members" className="space-y-3 px-2 pb-4">
               {team.map((member, i) => (
                 <li key={member.id} className="flex items-center gap-3">
                   <Avatar initials={member.avatar_initials} index={i} />

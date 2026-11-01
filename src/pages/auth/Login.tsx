@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useNavigate } from 'react-router-dom'
 import { notify } from '@/lib/notify'
 import { ArrowRight, Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -21,6 +21,7 @@ const inputClass =
 
 export function Login() {
   const { signIn, profile } = useAuth()
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -40,8 +41,10 @@ export function Login() {
           ? 'Your account has been deactivated. Contact an administrator to restore access.'
           : `Sign in failed: ${error.message}`,
       )
+      return
     }
-    else notify.success('Welcome back, you are now signed in')
+    notify.success('Welcome back, you are now signed in')
+    navigate('/dashboard', { replace: true })
   }
 
   async function handleQuickLogin(roleEmail: string) {
@@ -54,8 +57,10 @@ export function Login() {
           ? 'Your account has been deactivated. Contact an administrator to restore access.'
           : `Demo sign in failed: ${error.message}`,
       )
+      return
     }
-    else notify.success('Signed in to the demo workspace')
+    notify.success('Signed in to the demo workspace')
+    navigate('/dashboard', { replace: true })
   }
 
   const busy = loading || quickRole !== null

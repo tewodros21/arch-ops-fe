@@ -6,11 +6,16 @@ import type { ApiError, ErrorCode, Result } from './types'
 
 const TOKEN_KEY = 'archops.auth'
 const PAGE_SIZE = 200
+/** Refresh the access JWT this long before `exp` so polls never hit a 401 first */
+const REFRESH_AHEAD_MS = 60_000
 
 interface Tokens {
   access: string
   refresh: string
 }
+
+/** Per-tab session only — tabs do not share login state */
+const tokenStore: Storage | null = typeof window !== 'undefined' ? window.sessionStorage : null
 
 export interface Page<T> {
   count: number
@@ -36,7 +41,7 @@ const listeners = new Set<(signedIn: boolean) => void>()
 
 function readTokens(): Tokens | null {
   try {
-    const raw = localStorage.getItem(TOKEN_KEY)
+    const raw = tokenStore?.getItem(TOKEN_KEY)
     return raw ? (JSON.parse(raw) as Tokens) : null
   } catch {
     return null
@@ -51,16 +56,24 @@ export function refreshToken() {
   return readTokens()?.refresh ?? null
 }
 
-/** Stores (or clears) the token pair and tells listeners when the signed-in state flips */
-export function setTokens(tokens: Tokens | null) {
-  const wasSignedIn = hasSession()
+/** Stores (or clears) this tab's token pair and tells listeners when the signed-in state flips */
+export function setTokens(tokens: Tokens | null, opts?: { quiet?: boolean }) {
+  const previous = readTokens()
+  const wasSignedIn = !!previous
   try {
-    if (tokens) localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens))
-    else localStorage.removeItem(TOKEN_KEY)
+    if (tokens) tokenStore?.setItem(TOKEN_KEY, JSON.stringify(tokens))
+    else tokenStore?.removeItem(TOKEN_KEY)
   } catch {
     // Storage blocked (private mode): the session lasts until reload
   }
-  if (wasSignedIn !== !!tokens) listeners.forEach((l) => l(!!tokens))
+  const signedIn = !!tokens
+  if (tokens) scheduleProactiveRefresh()
+  else clearProactiveRefresh()
+  if (opts?.quiet) return
+  // Also notify when switching accounts while tokens were already present (stale/expired session)
+  if (wasSignedIn !== signedIn || (tokens != null && previous?.access !== tokens.access)) {
+    listeners.forEach((l) => l(signedIn))
+  }
 }
 
 export function onSessionChange(listener: (signedIn: boolean) => void) {
@@ -70,25 +83,117 @@ export function onSessionChange(listener: (signedIn: boolean) => void) {
   }
 }
 
-// Concurrent 401s share one refresh call
+function jwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const part = token.split('.')[1]
+    if (!part) return null
+    const normalized = part.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
+    return JSON.parse(atob(padded)) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
+function accessExpiresAt(access: string): number | null {
+  const exp = jwtPayload(access)?.exp
+  return typeof exp === 'number' ? exp * 1000 : null
+}
+
+let refreshTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearProactiveRefresh() {
+  if (refreshTimer != null) {
+    clearTimeout(refreshTimer)
+    refreshTimer = null
+  }
+}
+
+function scheduleProactiveRefresh() {
+  clearProactiveRefresh()
+  const access = readTokens()?.access
+  if (!access) return
+  const expiresAt = accessExpiresAt(access)
+  if (expiresAt == null) return
+  const delay = Math.max(expiresAt - Date.now() - REFRESH_AHEAD_MS, 0)
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null
+    if (!hasSession()) return
+    void refreshTokens().then((ok) => {
+      if (ok) scheduleProactiveRefresh()
+    })
+  }, delay)
+}
+
+/** Refresh now if the access token is missing, expired, or inside the skew window */
+async function ensureFreshAccess() {
+  const access = readTokens()?.access
+  if (!access) return
+  const expiresAt = accessExpiresAt(access)
+  if (expiresAt == null) return
+  if (expiresAt - Date.now() > REFRESH_AHEAD_MS) return
+  await refreshTokens()
+}
+
+// Concurrent 401s in this tab share one refresh call
 let refreshing: Promise<boolean> | null = null
 
 function refreshTokens(): Promise<boolean> {
   refreshing ??= (async () => {
-    const refresh = refreshToken()
+    const before = readTokens()
+    const refresh = before?.refresh
     if (!refresh) return false
     const { data } = await request<Partial<Tokens>>('POST', '/auth/refresh/', { body: { refresh }, auth: false })
-    if (!data?.access) {
-      setTokens(null)
-      return false
+    if (data?.access) {
+      // Quiet: same user in this tab — do not reload profile on every rotation
+      setTokens({ access: data.access, refresh: data.refresh ?? refresh }, { quiet: true })
+      return true
     }
-    // With ROTATE_REFRESH_TOKENS the server sends a new refresh token too
-    setTokens({ access: data.access, refresh: data.refresh ?? refresh })
-    return true
+    // A parallel refresh in this same tab may have already rotated the token
+    const after = readTokens()
+    if (after?.access && after.refresh && after.refresh !== refresh) {
+      scheduleProactiveRefresh()
+      return true
+    }
+    setTokens(null)
+    return false
   })().finally(() => {
     refreshing = null
   })
   return refreshing
+}
+
+/**
+ * Browsers can clone sessionStorage into a tab opened from this app (window.opener).
+ * Drop cloned auth so the new tab does not share or rotate the parent's refresh token.
+ */
+function dropAuthClonedFromOpener() {
+  try {
+    if (!window.opener || window.opener === window) return
+    try {
+      void window.opener.location.origin
+    } catch {
+      return
+    }
+    tokenStore?.removeItem(TOKEN_KEY)
+  } catch {
+    // ignore
+  }
+}
+
+if (typeof window !== 'undefined') {
+  // Stop using the old shared localStorage session if present
+  try {
+    window.localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // ignore
+  }
+  dropAuthClonedFromOpener()
+  scheduleProactiveRefresh()
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible' || !hasSession()) return
+    void ensureFreshAccess().then(() => scheduleProactiveRefresh())
+  })
 }
 
 // ── Requests ─────────────────────────────────────────────────────────────────
@@ -121,7 +226,17 @@ async function send(method: string, url: string, opts: Options) {
 }
 
 const STATUS_CODES: Record<number, ErrorCode> = { 400: 'validation', 401: 'unauthorized', 403: 'forbidden', 404: 'not_found', 409: 'conflict' }
-const KNOWN_CODES = new Set<ErrorCode>(['validation', 'unauthorized', 'account_deactivated', 'forbidden', 'not_found', 'conflict', 'in_use'])
+const KNOWN_CODES = new Set<ErrorCode>([
+  'validation',
+  'unauthorized',
+  'account_deactivated',
+  'forbidden',
+  'not_found',
+  'conflict',
+  'in_use',
+  'sent_back',
+  'with_requester',
+])
 
 /** Reads { detail, code, errors } (the documented shape) and plain DRF field-error bodies */
 async function parseError(res: Response): Promise<ApiError> {
@@ -149,6 +264,7 @@ async function parseError(res: Response): Promise<ApiError> {
 
 export async function request<T>(method: string, path: string, opts: Options = {}): Promise<Result<T>> {
   const url = buildUrl(path, opts.query)
+  if (opts.auth !== false && hasSession()) await ensureFreshAccess()
   let res = await send(method, url, opts)
 
   if (res?.status === 401 && opts.auth !== false && hasSession() && (await refreshTokens())) {

@@ -17,10 +17,28 @@ export async function fetchPurchaseRequests(): Promise<PurchaseRequest[]> {
   return data ?? []
 }
 
+/** Expected when Finance/GM opens a draft or a request they just sent back */
+const EXPECTED_UNAVAILABLE = new Set(['not_found', 'sent_back', 'with_requester'])
+
+export type PurchaseUnavailable = 'sent_back' | 'with_requester' | 'missing'
+
 export async function fetchPurchaseRequestById(id: string): Promise<PurchaseRequest | null> {
-  const { data, error } = await backend.purchases.get(id)
-  if (error) console.error(`Error fetching request ${id}:`, error)
+  const { data } = await loadPurchaseRequest(id)
   return data
+}
+
+/** Same as get-by-id, but keeps the reason so the detail page can explain send-back */
+export async function loadPurchaseRequest(
+  id: string,
+): Promise<{ data: PurchaseRequest | null; unavailable: PurchaseUnavailable | null; message: string | null }> {
+  const { data, error } = await backend.purchases.get(id)
+  if (data) return { data, unavailable: null, message: null }
+  if (error?.code === 'sent_back') return { data: null, unavailable: 'sent_back', message: error.message }
+  if (error?.code === 'with_requester') return { data: null, unavailable: 'with_requester', message: error.message }
+  if (error && !EXPECTED_UNAVAILABLE.has(error.code)) {
+    console.error(`Error fetching request ${id}:`, error)
+  }
+  return { data: null, unavailable: 'missing', message: error?.message ?? null }
 }
 
 export async function countPurchaseRequests(filter: PurchaseCountFilter): Promise<number> {
