@@ -1,19 +1,67 @@
-import type { ReactNode } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import { ChevronDown } from 'lucide-react'
 import { money } from './metrics'
 
-export function Pill({ children }: { children: ReactNode }) {
+export type RangeOption = { value: number; label: string }
+
+export function RangeSelect({ value, onChange, options, ariaLabel }: { value: number; onChange: (value: number) => void; options: RangeOption[]; ariaLabel: string }) {
+  const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const selected = options.find((option) => option.value === value) ?? options[0]
+
   return (
-    <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs text-[var(--ink)]">
-      {children}
-      <ChevronDown size={14} />
-    </span>
+    <div className="relative shrink-0">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((wasOpen) => !wasOpen)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') setOpen(false)
+        }}
+        className="flex items-center gap-1.5 rounded-full border border-black/10 px-3 py-1.5 text-xs text-[var(--ink)] transition-colors hover:border-black/20 hover:bg-[var(--canvas)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+      >
+        {selected?.label}
+        <ChevronDown size={14} className={clsx('transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div role="menu" aria-label={ariaLabel} className="absolute right-0 top-full z-30 mt-2 min-w-40 overflow-hidden rounded-2xl border border-black/10 bg-white p-1.5 text-sm text-[var(--ink)] shadow-[0_12px_32px_rgba(24,20,18,0.16)]">
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="menuitemradio"
+              aria-checked={value === option.value}
+              onClick={() => {
+                onChange(option.value)
+                setOpen(false)
+                triggerRef.current?.focus()
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setOpen(false)
+                  triggerRef.current?.focus()
+                }
+              }}
+              className={clsx(
+                'block w-full rounded-xl px-3 py-2 text-left transition-colors hover:bg-[var(--canvas)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]',
+                value === option.value && 'bg-[var(--accent-soft)] font-medium text-[var(--accent)]',
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
 /** White bento card with the dashboard's heading row */
-export function ChartCard({ title, subtitle, pill, className, children }: { title: string; subtitle: ReactNode; pill?: ReactNode; className?: string; children: ReactNode }) {
+export function ChartCard({ title, subtitle, action, className, children }: { title: string; subtitle: ReactNode; action?: ReactNode; className?: string; children: ReactNode }) {
   return (
     <section className={clsx('min-w-0 rounded-[1.75rem] bg-white p-6', className)}>
       <div className="flex items-start justify-between gap-3">
@@ -21,7 +69,7 @@ export function ChartCard({ title, subtitle, pill, className, children }: { titl
           <h2 className="text-2xl font-normal text-[var(--ink)]">{title}</h2>
           <p className="mt-1 text-xs text-slate-500">{subtitle}</p>
         </div>
-        {pill && <Pill>{pill}</Pill>}
+        {action}
       </div>
       {children}
     </section>

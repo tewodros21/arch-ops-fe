@@ -1,6 +1,6 @@
 import { backend, type PurchaseCountFilter, type QuotationInput, type RequestInput, type ItemInput } from '@/api'
 import { attachFile } from '@/lib/storage'
-import type { Department, PurchaseRequest, Project, Vendor } from '@/types'
+import type { Department, PurchaseRequest, Vendor } from '@/types'
 
 export type { ItemInput, RequestInput } from '@/api'
 
@@ -46,10 +46,8 @@ export async function countPurchaseRequests(filter: PurchaseCountFilter): Promis
   return data ?? 0
 }
 
-export async function fetchProjects(): Promise<Project[]> {
-  const { data, error } = await backend.projects.list({ activeOnly: true })
-  if (error) console.error('Error fetching projects:', error)
-  return data ?? []
+export function fetchProjects() {
+  return backend.projects.list({ activeOnly: true })
 }
 
 export async function fetchActiveVendors(): Promise<Vendor[]> {

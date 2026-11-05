@@ -22,8 +22,7 @@ export function DepartmentFormModal({ department, onClose, onSaved }: { departme
       return false
     }
     notify.success(department ? 'Department saved' : 'Department added')
-    // People stay under the old name after a rename, so the new name starts empty
-    onSaved({ ...data, member_count: data.member_count ?? (renamed ? 0 : (department?.member_count ?? 0)) })
+    onSaved({ ...data, member_count: data.member_count ?? department?.member_count ?? 0 })
     return true
   }
 
@@ -41,7 +40,7 @@ export function DepartmentFormModal({ department, onClose, onSaved }: { departme
       </Field>
       {renamed && (
         <p className="rounded-2xl bg-[var(--sun-soft)] px-4 py-3 text-xs leading-relaxed text-[var(--ink)]">
-          People and past requests keep the old name. Move people over from the Users tab.
+          Current members will use the new department name automatically. Existing purchase requests keep the department name recorded when they were created.
         </p>
       )}
       <Toggle checked={active} onChange={setActive} label="Active department" description="Archived departments can't be picked for people" />
