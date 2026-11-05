@@ -314,7 +314,7 @@ paths:
     get:
       tags: [Departments]
       summary: List departments
-      description: Includes `member_count` (users whose `department` equals this name).
+      description: Includes `member_count` (users related to this department; user department fields are represented by name in the API).
       operationId: departmentsList
       parameters:
         - $ref: '#/components/parameters/Page'
@@ -354,7 +354,7 @@ paths:
     patch:
       tags: [Departments]
       summary: Rename or archive a department (admin, owner)
-      description: Renaming does not move people or past requests; they keep the old name until edited.
+      description: Renaming updates the department name shown for its related users. Existing purchase requests keep the department name recorded when they were created.
       operationId: departmentsUpdate
       requestBody:
         required: true
@@ -378,6 +378,7 @@ paths:
         '204': { description: Deleted }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InUse' }
 
   # ── Projects ──────────────────────────────────────────────────────────────
   /projects/:
@@ -1212,7 +1213,7 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
-          example: { detail: 'Project has requests, archive it instead', code: in_use }
+          example: { detail: 'This item is still in use; archive it instead', code: in_use }
 
   schemas:
     # ── Enums ──

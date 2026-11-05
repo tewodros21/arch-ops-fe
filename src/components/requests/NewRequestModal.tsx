@@ -79,6 +79,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const [showErrors, setShowErrors] = useState(false)
   const [busy, setBusy] = useState(false)
   const [loadingEdit, setLoadingEdit] = useState(editing)
+  const [loadingProjects, setLoadingProjects] = useState(true)
+  const [projectLoadFailed, setProjectLoadFailed] = useState(false)
   const [touched, setTouched] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
@@ -99,10 +101,32 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     required_date: '',
   })
 
+  function applyProjectsResult({ data, error }: Awaited<ReturnType<typeof fetchProjects>>) {
+    setLoadingProjects(false)
+    if (error) {
+      console.error('Error fetching projects:', error)
+      setProjectLoadFailed(true)
+      notify.error('Could not load projects')
+      return
+    }
+    setProjectLoadFailed(false)
+    setProjects(data ?? [])
+  }
+
+  async function loadProjects() {
+    applyProjectsResult(await fetchProjects())
+  }
+
   useEffect(() => {
-    fetchProjects().then(setProjects)
+    let active = true
+    void fetchProjects().then((result) => {
+      if (active) applyProjectsResult(result)
+    })
     fetchActiveVendors().then(setVendors)
     fetchDepartments().then(setDepartments)
+    return () => {
+      active = false
+    }
   }, [])
 
   // Edit mode: prefill from the saved request
@@ -171,9 +195,16 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
 
   const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || (r.unit_price !== '' && Number(r.unit_price) < 0))
   const badQuote = newQuotes.find((q) => !q.vendor_id || !(Number(q.amount) > 0))
+  const projectError = loadingProjects
+    ? 'Projects are still loading. Please wait a moment.'
+    : projectLoadFailed
+      ? 'Could not load projects. Try again.'
+      : projects.length === 0
+        ? 'No active projects are available. Ask an admin to add or activate one before creating a purchase request.'
+        : 'Choose which project this purchase is for'
 
   const stepErrors: Record<number, string | null> = {
-    0: !form.title.trim() ? 'Add a short title for this request' : !form.project_id ? 'Choose which project this purchase is for' : null,
+    0: !form.title.trim() ? 'Add a short title for this request' : !form.project_id ? projectError : null,
     1: badItem ? 'Each item needs a name and a quantity' : null,
     2: !(estimate > 0) ? 'Enter an estimated amount to continue' : null,
     3: badQuote ? 'Each quote needs a vendor and an amount' : null,
@@ -377,7 +408,26 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                   </button>
                 )
               })}
-              {projects.length === 0 && <p className="text-sm text-slate-500">Loading projects…</p>}
+              {loadingProjects && <p className="text-sm text-slate-500">Loading projects…</p>}
+              {!loadingProjects && projectLoadFailed && (
+                <div role="alert" className="text-sm text-[var(--accent)]">
+                  Could not load projects.{' '}
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => {
+                      setLoadingProjects(true)
+                      setProjectLoadFailed(false)
+                      void loadProjects()
+                    }}
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+              {!loadingProjects && !projectLoadFailed && projects.length === 0 && (
+                <p className="text-sm text-slate-500">No active projects are available. Ask an admin to add or activate a project before creating a purchase request.</p>
+              )}
             </div>
           </Field>
 

@@ -23,13 +23,37 @@ const EMPTY_FORM = { project_id: '', labor_type: '', workers_required: 1, locati
 export function LaborRequestModal({ onClose }: { onClose: () => void }) {
   const { profile } = useAuth()
   const [projects, setProjects] = useState<Project[]>([])
+  const [loadingProjects, setLoadingProjects] = useState(true)
+  const [projectLoadFailed, setProjectLoadFailed] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [step, setStep] = useState(0)
   const [busy, setBusy] = useState(false)
   const [showErrors, setShowErrors] = useState(false)
 
+  function applyProjectsResult({ data, error }: Awaited<ReturnType<typeof fetchProjects>>) {
+    setLoadingProjects(false)
+    if (error) {
+      console.error('Error fetching projects:', error)
+      setProjectLoadFailed(true)
+      notify.error('Could not load projects')
+      return
+    }
+    setProjectLoadFailed(false)
+    setProjects(data ?? [])
+  }
+
+  async function loadProjects() {
+    applyProjectsResult(await fetchProjects())
+  }
+
   useEffect(() => {
-    fetchProjects().then(setProjects)
+    let active = true
+    void fetchProjects().then((result) => {
+      if (active) applyProjectsResult(result)
+    })
+    return () => {
+      active = false
+    }
   }, [])
 
   function update<K extends keyof typeof EMPTY_FORM>(key: K, value: (typeof EMPTY_FORM)[K]) {
@@ -167,7 +191,26 @@ export function LaborRequestModal({ onClose }: { onClose: () => void }) {
                   </button>
                 )
               })}
-              {projects.length === 0 && <p className="text-sm text-slate-500">Loading projects…</p>}
+              {loadingProjects && <p className="text-sm text-slate-500">Loading projects…</p>}
+              {!loadingProjects && projectLoadFailed && (
+                <div role="alert" className="text-sm text-[var(--accent)]">
+                  Could not load projects.{' '}
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => {
+                      setLoadingProjects(true)
+                      setProjectLoadFailed(false)
+                      void loadProjects()
+                    }}
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+              {!loadingProjects && !projectLoadFailed && projects.length === 0 && (
+                <p className="text-sm text-slate-500">No active projects are available. Ask an admin to add or activate a project before creating a labor request.</p>
+              )}
             </div>
           </Field>
 

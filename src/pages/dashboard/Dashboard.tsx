@@ -3,15 +3,16 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { differenceInCalendarDays, format, isSameDay, startOfDay, subDays } from 'date-fns'
-import { CalendarDays, Clock, HardHat, MapPin, MoreVertical } from 'lucide-react'
+import { CalendarDays, Clock, Copy, HardHat, MapPin, MoreVertical } from 'lucide-react'
 import { fetchAuditEvents, fetchLaborRequests, fetchPurchaseRequests } from '@/services'
 import { useAuth } from '@/context/AuthContext'
 import { Avatar } from '@/components/ui'
 import { KpiCards } from '@/components/dashboard/KpiCards'
 import { SpendCharts } from '@/components/dashboard/SpendCharts'
-import { Pill } from '@/components/dashboard/kit'
+import { RangeSelect } from '@/components/dashboard/kit'
 import { COLORS, DONE, IN_REVIEW, isOverdue, money } from '@/components/dashboard/metrics'
 import { formatDuration } from '@/services/labor'
+import { notify } from '@/lib/notify'
 import {
   LABOR_STATUS_LABELS,
   ROLE_LABELS,
@@ -51,7 +52,12 @@ const PROGRESS: Record<RequestStatus, number> = {
 }
 
 const HEAT_HOURS = [8, 10, 12, 14, 16, 18]
-const HEAT_DAYS = 12
+const RANGE_OPTIONS = [
+  { value: 7, label: 'This week' },
+  { value: 14, label: 'Last 2 weeks' },
+  { value: 30, label: 'Last 30 days' },
+  { value: 90, label: 'Last 90 days' },
+]
 
 const SERIES = [
   { key: 'approved', name: 'Approved', color: COLORS.accent },
@@ -75,10 +81,12 @@ export function Dashboard() {
   const [labor, setLabor] = useState<LaborRequest[]>([])
   const [activity, setActivity] = useState<AuditEvent[]>([])
   const [loading, setLoading] = useState(true)
+  const [requestRangeDays, setRequestRangeDays] = useState(7)
+  const [activityRangeDays, setActivityRangeDays] = useState(14)
 
   useEffect(() => {
     async function load() {
-      const since = startOfDay(subDays(new Date(), HEAT_DAYS - 1)).toISOString()
+      const since = startOfDay(subDays(new Date(), 89)).toISOString()
       const [reqs, laborRows, events] = await Promise.all([
         fetchPurchaseRequests(),
         fetchLaborRequests(),
@@ -100,30 +108,39 @@ export function Dashboard() {
     .slice()
     .sort((a, b) => (a.required_date ?? '9999').localeCompare(b.required_date ?? '9999'))
 
-  // ── Request volume, last 7 days ──
+  // ── Request volume for the selected range ──
   const today = startOfDay(new Date())
-  const week = Array.from({ length: 7 }, (_, i) => subDays(today, 6 - i))
-  const volume = week.map((day) => {
-    const onDay = scoped.filter((r) => isSameDay(new Date(r.created_at), day))
+  const requestRangeStart = startOfDay(subDays(today, requestRangeDays - 1))
+  const bucketSize = requestRangeDays > 30 ? 7 : 1
+  const bucketCount = Math.ceil(requestRangeDays / bucketSize)
+  const volume = Array.from({ length: bucketCount }, (_, i) => {
+    const start = subDays(today, requestRangeDays - 1 - i * bucketSize)
+    const end = i === bucketCount - 1 ? today : subDays(today, requestRangeDays - 1 - i * bucketSize - (bucketSize - 1))
+    const onBucket = scoped.filter((r) => {
+      const created = startOfDay(new Date(r.created_at))
+      return created >= start && created <= end
+    })
     return {
-      day: format(day, 'EEE'),
-      approved: onDay.filter((r) => DONE.includes(r.status)).length,
-      review: onDay.filter((r) => IN_REVIEW.includes(r.status)).length,
-      other: onDay.filter((r) => !DONE.includes(r.status) && !IN_REVIEW.includes(r.status)).length,
+      day: bucketSize === 1 ? format(start, requestRangeDays <= 7 ? 'EEE' : 'MMM d') : `${format(start, 'MMM d')}–${format(end, 'd')}`,
+      approved: onBucket.filter((r) => DONE.includes(r.status)).length,
+      review: onBucket.filter((r) => IN_REVIEW.includes(r.status)).length,
+      other: onBucket.filter((r) => !DONE.includes(r.status) && !IN_REVIEW.includes(r.status)).length,
     }
   })
-  const thisWeek = scoped.filter((r) => new Date(r.created_at) >= week[0]).length
-  const lastWeek = scoped.filter((r) => {
+  const currentCount = scoped.filter((r) => new Date(r.created_at) >= requestRangeStart).length
+  const previousStart = subDays(requestRangeStart, requestRangeDays)
+  const previousCount = scoped.filter((r) => {
     const d = new Date(r.created_at)
-    return d >= subDays(week[0], 7) && d < week[0]
+    return d >= previousStart && d < requestRangeStart
   }).length
-  const trend = lastWeek === 0 ? null : Math.round(((thisWeek - lastWeek) / lastWeek) * 100)
+  const trend = previousCount === 0 ? null : Math.round(((currentCount - previousCount) / previousCount) * 100)
   const approvedSpend = scoped
     .filter((r) => DONE.includes(r.status))
     .reduce((sum, r) => sum + Number(r.approved_amount ?? r.estimated_amount ?? 0), 0)
 
   // ── Activity heatmap: time slot × day ──
-  const heatDays = Array.from({ length: HEAT_DAYS }, (_, i) => subDays(today, HEAT_DAYS - 1 - i))
+  const activityRangeStart = startOfDay(subDays(today, activityRangeDays - 1))
+  const heatDays = Array.from({ length: activityRangeDays }, (_, i) => subDays(today, activityRangeDays - 1 - i))
   const heat = HEAT_HOURS.map((_, row) =>
     heatDays.map((day) =>
       activity.filter((a) => {
@@ -148,10 +165,10 @@ export function Dashboard() {
             <div>
               <h2 className="text-2xl font-normal text-[var(--ink)]">Requests</h2>
               <p className="mt-1 text-xs text-slate-500">
-                {trend === null ? `${thisWeek} this week` : `${trend >= 0 ? '+' : ''}${trend}% vs last week`} · {money(approvedSpend)} approved
+                {trend === null ? `${currentCount} in selected period` : `${trend >= 0 ? '+' : ''}${trend}% vs previous period`} · {money(approvedSpend)} approved
               </p>
             </div>
-            <Pill>This week</Pill>
+            <RangeSelect value={requestRangeDays} onChange={setRequestRangeDays} options={RANGE_OPTIONS} ariaLabel="Requests chart time range" />
           </div>
           <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
             {SERIES.map((sr) => (
@@ -197,9 +214,9 @@ export function Dashboard() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-2xl font-normal text-[var(--ink)]">Team activity</h2>
-              <p className="mt-1 text-xs text-slate-500">{activity.length} action{activity.length === 1 ? '' : 's'} logged</p>
+              <p className="mt-1 text-xs text-slate-500">{activity.filter((a) => new Date(a.created_at) >= activityRangeStart).length} action{activity.filter((a) => new Date(a.created_at) >= activityRangeStart).length === 1 ? '' : 's'} in selected period</p>
             </div>
-            <Pill>Last 2 weeks</Pill>
+            <RangeSelect value={activityRangeDays} onChange={setActivityRangeDays} options={RANGE_OPTIONS} ariaLabel="Team activity time range" />
           </div>
           <div className="mt-5 grid grid-cols-[auto_1fr] gap-x-3">
             <div className="grid gap-1.5">
@@ -210,9 +227,10 @@ export function Dashboard() {
               ))}
               <span className="pt-1 text-xs text-[var(--ink-soft)]">{format(today, 'MMM')}</span>
             </div>
-            <div className="grid gap-1.5">
+            <div className="min-w-0 overflow-x-auto">
+            <div className="grid min-w-[460px] gap-1.5" style={{ minWidth: activityRangeDays > 30 ? `${activityRangeDays * 12}px` : undefined }}>
               {heat.map((row, r) => (
-                <div key={r} className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${HEAT_DAYS}, minmax(0, 1fr))` }}>
+                <div key={r} className="grid gap-1.5" style={{ gridTemplateColumns: `repeat(${activityRangeDays}, minmax(0, 1fr))` }}>
                   {row.map((count, c) => (
                     <span
                       key={c}
@@ -223,13 +241,14 @@ export function Dashboard() {
                   ))}
                 </div>
               ))}
-              <div className="grid gap-1.5 pt-1" style={{ gridTemplateColumns: `repeat(${HEAT_DAYS}, minmax(0, 1fr))` }}>
+              <div className="grid gap-1.5 pt-1" style={{ gridTemplateColumns: `repeat(${activityRangeDays}, minmax(0, 1fr))` }}>
                 {heatDays.map((d) => (
                   <span key={d.toISOString()} className="text-center text-xs text-[var(--ink-soft)]">
                     {format(d, 'd')}
                   </span>
                 ))}
               </div>
+            </div>
             </div>
           </div>
         </section>
@@ -292,7 +311,7 @@ export function Dashboard() {
         })}
       </div>
 
-      <SpendCharts scoped={scoped} loading={loading} companyWide={profile.role !== 'employee'} />
+      <SpendCharts scoped={scoped} loading={loading} />
 
       {activeLabor.length > 0 && (
         <section>
@@ -330,20 +349,20 @@ export function Dashboard() {
 }
 
 function RequestCard({ request: r }: { request: PurchaseRequest }) {
+  const [menuOpen, setMenuOpen] = useState(false)
   const overdue = isOverdue(r)
   const dueSoon =
     !overdue && !!r.required_date && differenceInCalendarDays(new Date(r.required_date), new Date()) <= 3 && !DONE.includes(r.status)
   const dark = overdue
 
   return (
-    <Link
-      to={`/requests/${r.id}`}
+    <div
       className={clsx(
-        'focus-ring block overflow-hidden rounded-[1.5rem] transition-transform hover:-translate-y-0.5',
+        'relative overflow-hidden rounded-[1.5rem] transition-transform hover:-translate-y-0.5',
         dark ? 'bg-[linear-gradient(160deg,#24201d,#2f2a26)] text-white' : 'bg-white',
       )}
     >
-      <div className="p-5">
+      <Link to={`/requests/${r.id}`} className="focus-ring block p-5">
         <div className="flex items-center justify-between">
           {overdue ? (
             <Tag tone="sun">Overdue</Tag>
@@ -352,7 +371,7 @@ function RequestCard({ request: r }: { request: PurchaseRequest }) {
           ) : (
             <Tag tone={r.status === 'rejected' ? 'accent' : 'ink'}>{STATUS_LABELS[r.status]}</Tag>
           )}
-          <MoreVertical size={18} className={dark ? 'text-white/70' : 'text-[var(--ink)]'} />
+          <span className="h-8 w-8" aria-hidden="true" />
         </div>
         <p className={clsx('mt-3 truncate text-lg', dark ? 'text-white' : 'text-[var(--ink)]')}>{r.title}</p>
         <p className={clsx('mt-1 line-clamp-2 text-[15px] leading-snug', dark ? 'text-white/80' : 'text-[var(--ink-soft)]')}>
@@ -367,15 +386,37 @@ function RequestCard({ request: r }: { request: PurchaseRequest }) {
             </div>
           </div>
         )}
-      </div>
-      <div className={clsx('flex items-center justify-between border-t px-5 py-3.5 text-sm', dark ? 'border-white/10' : 'border-black/[0.06]')}>
+      </Link>
+      <button
+        type="button"
+        aria-label={`Actions for ${r.title}`}
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+        className={clsx('absolute right-4 top-4 z-10 flex h-8 w-8 items-center justify-center rounded-full hover:bg-black/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]', dark ? 'text-white/70 hover:bg-white/10' : 'text-[var(--ink)]')}
+      ><MoreVertical size={18} /></button>
+      {menuOpen && (
+        <div role="menu" className="absolute right-4 top-12 z-20 min-w-40 rounded-xl border border-black/10 bg-white p-1.5 text-sm text-[var(--ink)] shadow-lg">
+          <Link role="menuitem" to={`/requests/${r.id}`} onClick={() => setMenuOpen(false)} className="block rounded-lg px-3 py-2 hover:bg-black/5">Open request</Link>
+          <button role="menuitem" type="button" onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(r.request_number)
+              notify.success('Request number copied')
+            } catch {
+              notify.error('Could not copy request number')
+            }
+            setMenuOpen(false)
+          }} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left hover:bg-black/5"><Copy size={14} /> Copy request number</button>
+        </div>
+      )}
+      <Link to={`/requests/${r.id}`} className={clsx('flex items-center justify-between border-t px-5 py-3.5 text-sm', dark ? 'border-white/10' : 'border-black/[0.06]')}>
         <span className="flex items-center gap-2">
           <CalendarDays size={16} strokeWidth={1.75} />
           {dueLabel(r.required_date)}
         </span>
         <span className="font-medium">{money(Number(r.approved_amount ?? r.estimated_amount ?? 0))}</span>
-      </div>
-    </Link>
+      </Link>
+    </div>
   )
 }
 
