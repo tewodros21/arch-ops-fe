@@ -30,7 +30,7 @@ export function DepartmentFormModal({ department, onClose, onSaved }: { departme
   return (
     <FormModal
       title={department ? 'Edit department' : 'New department'}
-      description="People and purchase requests are grouped by department."
+      description="Site crew and purchase requests are grouped by department."
       icon={Building2}
       submitLabel={department ? 'Save changes' : 'Add department'}
       onSubmit={submit}
@@ -44,7 +44,7 @@ export function DepartmentFormModal({ department, onClose, onSaved }: { departme
           People and past requests keep the old name. Move people over from the Users tab.
         </p>
       )}
-      <Toggle checked={active} onChange={setActive} label="Active department" description="Archived departments can't be picked for people" />
+      <Toggle checked={active} onChange={setActive} label="Active department" description="Archived departments can't be picked for site employees" />
     </FormModal>
   )
 }

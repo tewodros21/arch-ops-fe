@@ -57,11 +57,14 @@ export function Account() {
       notify.error(`Could not change password: ${error}`)
       return
     }
+    const wasForced = !!profile.must_change_password
     notify.success('Password changed, use it next time')
     setCurrentPw('')
     setPassword('')
     setConfirmPw('')
     setPwTouched(false)
+    await refreshProfile()
+    if (wasForced) navigate('/dashboard', { replace: true })
   }
 
   async function handleSignOut() {
@@ -84,9 +87,8 @@ export function Account() {
             <p className="mt-1 truncate text-sm text-[var(--ink-soft)]">{profile.email}</p>
           </div>
         </div>
-        <div className="mt-6 grid grid-cols-2 gap-4 border-t border-black/[0.06] pt-6 md:grid-cols-4">
+        <div className="mt-6 grid grid-cols-2 gap-4 border-t border-black/[0.06] pt-6 md:grid-cols-3">
           <Meta label="Role">{ROLE_LABELS[profile.role]}</Meta>
-          <Meta label="Department">{profile.department || 'Not set'}</Meta>
           <Meta label="Email">{profile.email}</Meta>
           <Meta label="Account status">{profile.is_active ? 'Active' : 'Inactive'}</Meta>
         </div>
@@ -105,10 +107,10 @@ export function Account() {
                 <Field label="Email" htmlFor="acc-email" hint="Read only">
                   <input id="acc-email" value={profile.email} readOnly className="field cursor-not-allowed !bg-[var(--canvas)] text-[var(--ink-soft)]" />
                 </Field>
-                <Field label="Role and department" htmlFor="acc-role" hint="Set by an admin">
+                <Field label="Role" htmlFor="acc-role" hint="Set by an admin">
                   <input
                     id="acc-role"
-                    value={`${ROLE_LABELS[profile.role]}${profile.department ? ` · ${profile.department}` : ''}`}
+                    value={ROLE_LABELS[profile.role]}
                     readOnly
                     className="field cursor-not-allowed !bg-[var(--canvas)] text-[var(--ink-soft)]"
                   />

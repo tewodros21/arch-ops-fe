@@ -88,7 +88,7 @@ export function KpiCards({
   const approved = scoped.filter((r) => DONE.includes(r.status))
   const approvedTotal = approved.reduce((s, r) => s + approvedValue(r), 0)
 
-  const myLabor = profile.role === 'employee' ? labor.filter((l) => l.requested_by === profile.id) : labor
+  const myLabor = profile.role === 'site_engineer' ? labor.filter((l) => l.requested_by === profile.id) : labor
   const activeLabor = myLabor.filter((l) => !['completed', 'cancelled'].includes(l.status))
   const workers = activeLabor.reduce((s, l) => s + Number(l.workers_required ?? 0), 0)
 

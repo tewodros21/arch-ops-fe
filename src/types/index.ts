@@ -1,4 +1,10 @@
-export type Role = 'employee' | 'finance' | 'general_manager' | 'owner' | 'admin'
+export type Role =
+  | 'admin'
+  | 'ceo'
+  | 'project_manager'
+  | 'site_engineer'
+  | 'finance'
+  | 'shopkeeper'
 
 export type RequestStatus =
   | 'draft'
@@ -22,6 +28,9 @@ export interface Profile {
   department: string | null
   is_active: boolean
   avatar_initials: string
+  must_change_password?: boolean
+  has_all_projects?: boolean
+  project_ids?: string[]
 }
 
 export interface Project {

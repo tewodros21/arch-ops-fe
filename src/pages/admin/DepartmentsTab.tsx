@@ -39,7 +39,7 @@ export function DepartmentsTab() {
     const ok = await confirm({
       title: `Delete ${d.name}?`,
       body: count
-        ? `${count} ${count === 1 ? 'person is' : 'people are'} still in this department. They keep the name until you move them, so archiving is usually safer.`
+        ? `${count} ${count === 1 ? 'site employee is' : 'site employees are'} still in this department. Move them first, or archive instead.`
         : 'Past requests keep their department name. This only removes it from the list.',
       confirmLabel: 'Delete department',
       tone: 'danger',
@@ -66,9 +66,9 @@ export function DepartmentsTab() {
       {loading ? (
         <p className="py-16 text-center text-sm text-slate-500">Loading departments…</p>
       ) : departments.length === 0 ? (
-        <EmptyCard icon={Building2} title="No departments yet" body="Add the teams your people and requests belong to." />
+        <EmptyCard icon={Building2} title="No departments yet" body="Add the site teams your crew and requests belong to." />
       ) : (
-        <ListCard columns={['Department', 'People', 'Status', '']} template={TEMPLATE}>
+        <ListCard columns={['Department', 'Site crew', 'Status', '']} template={TEMPLATE}>
           {departments.map((d) => (
             <li key={d.id} className={clsx('flex items-center gap-3 rounded-2xl px-3 py-3 transition-colors hover:bg-[var(--canvas)] md:grid md:gap-4', TEMPLATE)}>
               <div className="flex min-w-0 flex-1 items-center gap-3">

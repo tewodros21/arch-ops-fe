@@ -1,11 +1,12 @@
 import type { Role, RequestStatus, AttachmentType, LaborStatus } from '@/types'
 
 export const ROLE_LABELS: Record<Role, string> = {
-  employee: 'Employee',
+  admin: 'Admin',
+  ceo: 'CEO',
+  project_manager: 'Project Manager',
+  site_engineer: 'Site Engineer',
   finance: 'Finance',
-  general_manager: 'General Manager',
-  owner: 'Owner',
-  admin: 'Administrator',
+  shopkeeper: 'Shopkeeper',
 }
 
 export const STATUS_LABELS: Record<RequestStatus, string> = {

@@ -10,8 +10,8 @@ export const NAVIGATION_ITEMS: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', roles: null },
   { to: '/requests', label: 'Purchase Requests', roles: null },
   { to: '/labor', label: 'Labor Requests', roles: null },
-  { to: '/vendors', label: 'Vendors', roles: ['admin', 'owner', 'finance'] },
-  { to: '/audit', label: 'Audit Log', roles: ['admin', 'owner'] },
+  { to: '/vendors', label: 'Vendors', roles: ['admin', 'finance'] },
+  { to: '/audit', label: 'Audit Log', roles: ['admin', 'ceo'] },
 ]
 
 // Any dashboard link to these searches opens the matching create modal over the current page

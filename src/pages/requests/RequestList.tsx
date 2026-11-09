@@ -59,7 +59,7 @@ export function RequestList() {
   // Employees see only their own requests; drafts stay private to their requester (and admins)
   const scoped = requests.filter((r) => {
     const mine = r.requester_id === profile?.id
-    if (profile?.role === 'employee') return mine
+    if (profile?.role === 'site_engineer') return mine
     if (EDITABLE_STATUSES.includes(r.status)) return mine || profile?.role === 'admin'
     return true
   })

@@ -73,17 +73,20 @@ export interface ProfilePatch {
   full_name?: string
   avatar_initials?: string
   role?: Role
-  department?: string | null
   is_active?: boolean
+  has_all_projects?: boolean
+  project_ids?: string[]
+  password?: string
 }
 
-/** An admin adding a teammate; they sign in with the temporary password and change it on their Account page */
+/** An admin adding a teammate; they sign in with the temporary password and change it on first login */
 export interface NewUserInput {
   email: string
   full_name: string
   role: Role
-  department: string | null
   password: string
+  has_all_projects?: boolean
+  project_ids?: string[]
 }
 
 export interface LaborInput {

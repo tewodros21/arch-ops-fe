@@ -17,11 +17,11 @@ const STAGES = [
 
 // Role cards: drop cut-out PNGs (transparent background) into public/assets/roles/
 const ROLES: { role: Role; blurb: string; bg: string; fg: string }[] = [
-  { role: 'employee', blurb: 'Raises requests, attaches quotes and tracks status without chasing anyone.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
-  { role: 'finance', blurb: 'Reviews pricing and budget. The first checkpoint on every spend.', bg: 'var(--sun)', fg: 'var(--ink)' },
-  { role: 'general_manager', blurb: 'Makes sure the work is justified before it reaches final sign-off.', bg: 'var(--accent)', fg: '#ffffff' },
-  { role: 'owner', blurb: 'Gives final approval and sees spend across every project.', bg: 'var(--panel-dark)', fg: '#ffffff' },
-  { role: 'admin', blurb: 'Runs users, projects, vendors and the rules the workflow follows.', bg: '#e6e1da', fg: 'var(--ink)' },
+  { role: 'site_engineer', blurb: 'Raises purchase requests for site needs and tracks status.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
+  { role: 'finance', blurb: 'Gives final approval and buys the approved items.', bg: 'var(--sun)', fg: 'var(--ink)' },
+  { role: 'project_manager', blurb: 'Reviews requests for assigned projects before Finance.', bg: 'var(--accent)', fg: '#ffffff' },
+  { role: 'ceo', blurb: 'Oversight across projects — view and rare requests, never approvals.', bg: 'var(--panel-dark)', fg: '#ffffff' },
+  { role: 'admin', blurb: 'Creates users, projects and the rules the workflow follows.', bg: '#e6e1da', fg: 'var(--ink)' },
 ]
 
 const BEFORE = ['Phone calls for every request', 'Screenshots as the only record', 'No idea what is pending or late', 'Manual follow-ups on every purchase']

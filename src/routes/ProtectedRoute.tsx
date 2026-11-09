@@ -1,8 +1,9 @@
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
 
 export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { profile, loading } = useAuth()
+  const location = useLocation()
 
   if (loading) {
     return (
@@ -13,6 +14,11 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!profile) return <Navigate to="/login" replace />
+
+  // First-login gate: temporary password must be changed before using the app
+  if (profile.must_change_password && location.pathname !== '/account') {
+    return <Navigate to="/account" replace state={{ forcePasswordChange: true }} />
+  }
 
   return <>{children}</>
 }

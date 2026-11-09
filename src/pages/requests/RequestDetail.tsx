@@ -118,14 +118,14 @@ export function RequestDetail() {
   const canAct = myTurn && !isRequester
   const editable = isRequester && EDITABLE_STATUSES.includes(req.status)
   const financeOrAdmin = role === 'finance' || role === 'admin'
-  const canPurchase = financeOrAdmin || role === 'owner'
+  const canPurchase = financeOrAdmin
   const canComplete = canPurchase || isRequester
   // Mirrors the API's quotation rules (POST /purchase-requests/{id}/quotations/)
   const canAddQuote =
     (isRequester && ['draft', 'quote_received', 'awaiting_finance'].includes(req.status)) ||
     (financeOrAdmin && !['purchased', 'completed', 'rejected'].includes(req.status))
   const canSelectQuote = financeOrAdmin && !['purchased', 'completed', 'rejected'].includes(req.status)
-  const canSetAmount = role === 'finance' || role === 'owner'
+  const canSetAmount = role === 'finance' || role === 'admin'
 
   const quotes = [...(req.quotations ?? [])].sort((a, b) => Number(a.amount) - Number(b.amount))
   const lowest = quotes.length ? Number(quotes[0].amount) : null

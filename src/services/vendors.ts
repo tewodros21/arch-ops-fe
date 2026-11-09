@@ -4,7 +4,7 @@ import type { Role, Vendor } from '@/types'
 export type { VendorHistory, VendorInput, VendorQuoteRow, VendorRequestSummary } from '@/api'
 
 /** Mirrors the API's vendor permissions */
-export const VENDOR_MANAGER_ROLES: Role[] = ['admin', 'owner', 'finance']
+export const VENDOR_MANAGER_ROLES: Role[] = ['admin', 'finance']
 
 export async function fetchVendors(): Promise<Vendor[]> {
   const { data, error } = await backend.vendors.list()

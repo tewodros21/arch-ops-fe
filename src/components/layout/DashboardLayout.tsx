@@ -75,7 +75,7 @@ export function DashboardLayout() {
           onSaved={() => window.dispatchEvent(new Event(VENDOR_CREATED_EVENT))}
         />
       )}
-      {creating === 'project' && profile && (profile.role === 'admin' || profile.role === 'owner') && (
+      {creating === 'project' && profile && (profile.role === 'admin' || profile.role === 'ceo') && (
         <ProjectFormModal
           project={null}
           onClose={closeCreate}
@@ -85,7 +85,7 @@ export function DashboardLayout() {
       {creating === 'user' && profile?.role === 'admin' && (
         <UserFormModal onClose={closeCreate} onSaved={() => window.dispatchEvent(new Event(USER_CREATED_EVENT))} />
       )}
-      {creating === 'department' && profile && (profile.role === 'admin' || profile.role === 'owner') && (
+      {creating === 'department' && profile?.role === 'site_engineer' && (
         <DepartmentFormModal
           department={null}
           onClose={closeCreate}

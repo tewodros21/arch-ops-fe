@@ -10,9 +10,9 @@ import { DepartmentsTab } from './DepartmentsTab'
 type Tab = 'users' | 'projects' | 'departments'
 
 const TABS: { id: Tab; label: string; icon: typeof Users; roles: Role[]; subtitle: string }[] = [
-  { id: 'users', label: 'Users', icon: Users, roles: ['admin'], subtitle: 'Roles and departments decide who approves what' },
-  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin', 'owner'], subtitle: 'Sites requests are raised against, with spend against budget' },
-  { id: 'departments', label: 'Departments', icon: Building2, roles: ['admin', 'owner'], subtitle: 'Teams people and requests belong to' },
+  { id: 'users', label: 'Users', icon: Users, roles: ['admin'], subtitle: 'Create accounts and assign projects for managers and site engineers' },
+  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin', 'ceo'], subtitle: 'Sites requests are raised against, with spend against budget' },
+  { id: 'departments', label: 'Departments', icon: Building2, roles: ['site_engineer'], subtitle: 'Site crew teams managed by the site engineer' },
 ]
 
 export function Admin() {
@@ -42,7 +42,7 @@ export function Admin() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Admin" subtitle={current.subtitle} />
+      <PageHeader title={profile.role === 'site_engineer' ? 'Site setup' : 'Admin'} subtitle={current.subtitle} />
 
       <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
         {allowed.map((t) => (

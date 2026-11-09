@@ -16,9 +16,10 @@ export const NAV: NavEntry[] = [
   { to: '/dashboard', label: 'Overview', short: 'Home', icon: LayoutGrid, roles: null },
   { to: '/requests', label: 'Purchase Requests', short: 'Purchases', icon: ShoppingCart, roles: null },
   { to: '/labor', label: 'Labor Requests', short: 'Labor', icon: Users, roles: null },
-  { to: '/vendors', label: 'Vendors', short: 'Vendors', icon: Truck, roles: ['admin', 'owner', 'finance'] },
-  { to: '/audit', label: 'Audit Log', short: 'Audit', icon: History, roles: ['admin', 'owner'] },
-  { to: '/admin', label: 'Admin', short: 'Admin', icon: Settings2, roles: ['admin', 'owner'] },
+  { to: '/vendors', label: 'Vendors', short: 'Vendors', icon: Truck, roles: ['admin', 'finance'] },
+  { to: '/audit', label: 'Audit Log', short: 'Audit', icon: History, roles: ['admin', 'ceo'] },
+  { to: '/admin', label: 'Admin', short: 'Admin', icon: Settings2, roles: ['admin', 'ceo'] },
+  { to: '/admin/departments', label: 'Departments', short: 'Depts', icon: Building2, roles: ['site_engineer'] },
 ]
 
 export function navFor(role: Role) {
@@ -31,13 +32,13 @@ export function createActionFor(pathname: string, role: Role) {
   if (pathname.startsWith('/vendors') && VENDOR_MANAGER_ROLES.includes(role)) {
     return { search: NEW_VENDOR_SEARCH, label: 'Add vendor', aria: 'Add vendor', icon: Store }
   }
-  if (pathname === '/admin/projects' && (role === 'admin' || role === 'owner')) {
+  if (pathname === '/admin/projects' && (role === 'admin' || role === 'ceo')) {
     return { search: NEW_PROJECT_SEARCH, label: 'Add project', aria: 'Add project', icon: FolderKanban }
   }
   if (pathname === '/admin/users' && role === 'admin') {
     return { search: NEW_USER_SEARCH, label: 'Add user', aria: 'Add user', icon: UserPlus }
   }
-  if (pathname === '/admin/departments' && (role === 'admin' || role === 'owner')) {
+  if (pathname === '/admin/departments' && role === 'site_engineer') {
     return { search: NEW_DEPARTMENT_SEARCH, label: 'Add department', aria: 'Add department', icon: Building2 }
   }
   return { search: NEW_REQUEST_SEARCH, label: 'New request', aria: 'New purchase request', icon: Plus }
