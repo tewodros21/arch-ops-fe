@@ -2,6 +2,10 @@ import type { Role, RequestStatus, AttachmentType, LaborStatus } from '@/types'
 
 export const ROLE_LABELS: Record<Role, string> = {
   employee: 'Employee',
+  ceo: 'CEO',
+  project_manager: 'Project Manager',
+  site_engineer: 'Site Engineer',
+  shopkeeper: 'Shopkeeper',
   finance: 'Finance',
   general_manager: 'General Manager',
   owner: 'Owner',
@@ -11,24 +15,24 @@ export const ROLE_LABELS: Record<Role, string> = {
 export const STATUS_LABELS: Record<RequestStatus, string> = {
   draft: 'Draft',
   quote_received: 'Quote Received',
+  awaiting_pm: 'Awaiting Project Manager',
   awaiting_finance: 'Awaiting Finance',
-  awaiting_gm: 'Awaiting GM',
-  awaiting_owner: 'Awaiting Owner',
   approved: 'Approved',
   rejected: 'Rejected',
   purchased: 'Purchased',
+  partially_received: 'Partially Received',
   completed: 'Completed',
 }
 
 export const STATUS_COLORS: Record<RequestStatus, string> = {
   draft: 'var(--status-draft)',
   quote_received: 'var(--status-amber)',
+  awaiting_pm: 'var(--status-amber)',
   awaiting_finance: 'var(--status-amber)',
-  awaiting_gm: 'var(--status-amber)',
-  awaiting_owner: 'var(--status-amber)',
   approved: 'var(--status-blue)',
   rejected: 'var(--status-red)',
   purchased: 'var(--status-purple)',
+  partially_received: 'var(--status-purple)',
   completed: 'var(--status-green)',
 }
 

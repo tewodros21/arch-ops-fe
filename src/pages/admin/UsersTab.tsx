@@ -3,12 +3,13 @@ import { Link } from 'react-router-dom'
 import { Pencil, Plus, Power, Search, UserCog, UserPlus, Users } from 'lucide-react'
 import { Avatar, useConfirm } from '@/components/ui'
 import { Field, FormModal } from '@/components/admin/FormModal'
+import { ProjectAssignmentField } from '@/components/admin/UserFormModal'
 import { NEW_USER_SEARCH, USER_CREATED_EVENT } from '@/constants'
 import { useAuth } from '@/context/AuthContext'
 import { notify } from '@/lib/notify'
-import { fetchAllDepartments, fetchTeam, updateProfile } from '@/services'
+import { fetchAllDepartments, fetchProjects, fetchTeam, updateProfile } from '@/services'
 import { getInitials } from '@/utils'
-import { ROLE_LABELS, type Department, type Profile, type Role } from '@/types'
+import { ROLE_LABELS, type Department, type Profile, type Project, type Role } from '@/types'
 import { EmptyCard, ListCard } from './shared'
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
@@ -198,15 +199,28 @@ function EditPersonModal({ person, departments, onClose, onSaved }: { person: Pr
   const [name, setName] = useState(person.full_name)
   const [role, setRole] = useState<Role>(person.role)
   const [department, setDepartment] = useState(person.department ?? '')
+  const [assignedProjectIds, setAssignedProjectIds] = useState<string[]>(person.assigned_project_ids ?? [])
+  const [projects, setProjects] = useState<Project[]>([])
   const [touched, setTouched] = useState(false)
   const isMe = me?.id === person.id
   // Keep an inactive department selectable if the person is still in it
   const options = departments.filter((d) => d.is_active || d.name === person.department)
   const nameError = touched && !name.trim() ? 'Required' : null
 
+  useEffect(() => {
+    fetchProjects(false).then(({ data, error }) => {
+      if (error) notify.error('Could not load projects for Project Manager assignment')
+      setProjects(data ?? [])
+    })
+  }, [])
+
   async function submit() {
     setTouched(true)
     if (!name.trim()) return false
+    if (role === 'project_manager' && assignedProjectIds.length === 0) {
+      notify.warning('Assign at least one project to this Project Manager')
+      return false
+    }
     if (isMe && role !== person.role) {
       const ok = await confirm({
         title: 'Change your own role?',
@@ -216,7 +230,15 @@ function EditPersonModal({ person, departments, onClose, onSaved }: { person: Pr
       })
       if (!ok) return false
     }
-    const patch = { full_name: name.trim(), avatar_initials: getInitials(name.trim()) || person.avatar_initials, role, department: department || null }
+    const patch = {
+      full_name: name.trim(),
+      avatar_initials: getInitials(name.trim()) || person.avatar_initials,
+      role,
+      department: department || null,
+      ...(role === 'project_manager' || person.role === 'project_manager'
+        ? { assigned_project_ids: role === 'project_manager' ? assignedProjectIds : [] }
+        : {}),
+    }
     const { data, error } = await updateProfile(person.id, patch)
     if (error || !data) {
       notify.error(`Could not save changes: ${error?.message ?? 'no permission'}`)
@@ -257,8 +279,14 @@ function EditPersonModal({ person, departments, onClose, onSaved }: { person: Pr
           </select>
         </Field>
       </div>
+      <ProjectAssignmentField
+        enabled={role === 'project_manager'}
+        projects={projects}
+        selected={assignedProjectIds}
+        onChange={setAssignedProjectIds}
+      />
       <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-xs leading-relaxed text-[var(--ink-soft)]">
-        Finance, the General Manager and the Owner each approve one stage. Employees see requests from their own department.
+        Project Managers review requests for their assigned projects before Finance. Reassign or clear project assignments here.
       </p>
     </FormModal>
   )

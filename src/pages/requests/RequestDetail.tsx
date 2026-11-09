@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
-import { Check, Clock, CornerUpLeft, FileText, Paperclip, Pencil, Plus, RotateCcw, Send, ShieldCheck, Trash2, Upload, X as XIcon } from 'lucide-react'
+import { Check, Clock, FileText, PackageCheck, Paperclip, Pencil, Plus, RotateCcw, Send, ShieldCheck, Trash2, Upload, X as XIcon } from 'lucide-react'
 import { notify } from '@/lib/notify'
 import { useAuth } from '@/context/AuthContext'
 import { Avatar, Breadcrumbs, Button, StatusBadge, useConfirm } from '@/components/ui'
@@ -10,9 +10,9 @@ import {
   approveStage,
   completeRequest,
   EDITABLE_STATUSES,
+  recordReceipt,
   recordPurchase,
   rejectRequest,
-  returnToRequester,
   ROLE_STAGE,
   STAGE_LABELS,
   stageForStatus,
@@ -28,7 +28,7 @@ import {
   selectQuotation,
   type PurchaseUnavailable,
 } from '@/services/requests'
-import { ATTACHMENT_TYPE_LABELS, ROLE_LABELS, type AttachmentType, type PurchaseAttachment, type PurchaseRequest, type Vendor } from '@/types'
+import { ATTACHMENT_TYPE_LABELS, ROLE_LABELS, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest, type Vendor } from '@/types'
 import { formatCurrency } from '@/utils'
 
 const EMPTY_QUOTE = { vendor_id: '', amount: '', valid_until: '', notes: '' }
@@ -46,6 +46,7 @@ export function RequestDetail() {
   const [busy, setBusy] = useState<string | null>(null)
   const [approvedAmount, setApprovedAmount] = useState<string | null>(null)
   const [purchaseAmount, setPurchaseAmount] = useState('')
+  const [receiptQuantities, setReceiptQuantities] = useState<Record<string, string>>({})
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [uploadType, setUploadType] = useState<AttachmentType>('other')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
@@ -110,6 +111,7 @@ export function RequestDetail() {
 
   const req = request
   const role = profile?.role
+  const isShopkeeper = role === 'shopkeeper'
   const isRequester = !!profile && profile.id === req.requester_id
   const myStage = role ? ROLE_STAGE[role] : null
   const currentStage = stageForStatus(req.status)
@@ -118,30 +120,38 @@ export function RequestDetail() {
   const canAct = myTurn && !isRequester
   const editable = isRequester && EDITABLE_STATUSES.includes(req.status)
   const financeOrAdmin = role === 'finance' || role === 'admin'
-  const canPurchase = financeOrAdmin || role === 'owner'
-  const canComplete = canPurchase || isRequester
+  const canPurchase = role === 'finance'
   // Mirrors the API's quotation rules (POST /purchase-requests/{id}/quotations/)
-  const canAddQuote =
-    (isRequester && ['draft', 'quote_received', 'awaiting_finance'].includes(req.status)) ||
-    (financeOrAdmin && !['purchased', 'completed', 'rejected'].includes(req.status))
-  const canSelectQuote = financeOrAdmin && !['purchased', 'completed', 'rejected'].includes(req.status)
-  const canSetAmount = role === 'finance' || role === 'owner'
+  const canAddQuote = (isRequester || financeOrAdmin) && ['draft', 'quote_received'].includes(req.status)
+  const canSelectQuote = financeOrAdmin && ['draft', 'quote_received'].includes(req.status)
+  const canSetAmount = role === 'finance' && currentStage === 'finance'
+  const requestDate = req.submitted_at ?? req.created_at
 
   const quotes = [...(req.quotations ?? [])].sort((a, b) => Number(a.amount) - Number(b.amount))
   const lowest = quotes.length ? Number(quotes[0].amount) : null
   const selectedQuote = quotes.find((q) => q.is_selected)
   const items = req.items ?? []
   const itemsTotal = items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.estimated_unit_price ?? 0), 0)
+  const allItemsReceived = items.length > 0 && items.every((item) => Number(item.received_quantity ?? 0) >= Number(item.quantity))
+  const canComplete = isShopkeeper && allItemsReceived && ['purchased', 'partially_received'].includes(req.status)
+  const approvalStages: ApprovalStage[] = [
+    ...(req.requester?.role === 'project_manager' && !req.approvals?.some((approval) => approval.stage === 'project_manager')
+      ? []
+      : ['project_manager' as const]),
+    'finance',
+    ...(req.approvals?.some((approval) => approval.stage === 'gm') ? ['gm' as const] : []),
+    ...(req.approvals?.some((approval) => approval.stage === 'owner') ? ['owner' as const] : []),
+  ]
   const defaultApproved = Number(selectedQuote?.amount ?? req.approved_amount ?? req.estimated_amount)
   const approvedInput = approvedAmount ?? String(defaultApproved)
-  const nextStep = currentStage === 'finance' ? 'the General Manager' : currentStage === 'gm' ? 'the Owner' : 'purchasing'
+  const nextStep = currentStage === 'project_manager' ? 'Finance' : 'purchasing'
 
   // Hero shows the latest known figure large, the others underneath
-  const amounts = [
+  const amounts = (isShopkeeper ? [] : [
     { label: 'Estimated', value: req.estimated_amount },
     { label: 'Approved', value: req.approved_amount },
     { label: 'Paid', value: req.actual_amount },
-  ].filter((a) => a.value != null)
+  ]).filter((a) => a.value != null)
   const headline = amounts[amounts.length - 1]
 
   function pickFile(setter: (f: File | null) => void) {
@@ -170,13 +180,16 @@ export function RequestDetail() {
 
   async function handleSubmit() {
     const ok = await confirm({
-      title: 'Submit for Finance review?',
+      title: 'Submit this request?',
       body: 'You will not be able to edit it while it is being reviewed.',
       confirmLabel: 'Submit request',
       tone: 'accent',
       icon: Send,
     })
-    if (ok) await run('submit', () => submitRequest(req.id), 'Request submitted for Finance review', 'Could not submit this request')
+    if (ok) {
+      const next = role === 'project_manager' ? 'Finance' : 'the assigned Project Manager'
+      await run('submit', () => submitRequest(req.id), `Request submitted for ${next} review`, 'Could not submit this request')
+    }
   }
 
   async function handleDelete() {
@@ -236,30 +249,6 @@ export function RequestDetail() {
     await run('reject', () => rejectRequest(req.id, reason), 'Request rejected and the reason was saved', 'Could not reject this request')
   }
 
-  async function handleReturn() {
-    const note = await confirm({
-      title: 'Send back for changes?',
-      body: 'The requester can edit and resubmit. Approvals start over from Finance.',
-      confirmLabel: 'Send back',
-      tone: 'ink',
-      icon: CornerUpLeft,
-      input: { label: 'What needs to change?', placeholder: 'e.g. Add a second vendor quote', required: true },
-    })
-    if (note === null) return
-    setBusy('return')
-    const { error } = await returnToRequester(req.id, note)
-    setBusy(null)
-    if (error) {
-      notify.error(`Could not send this request back: ${error}`)
-      return
-    }
-    notify.success('Sent back to the requester for changes')
-    // Show the sent-back screen instead of treating the hidden request as an error
-    setRequest(null)
-    setUnavailable('sent_back')
-    setUnavailableMessage('This purchase was sent back to the requester for changes.')
-  }
-
   async function handleRecordPurchase() {
     if (!profile) return
     const amount = Number(purchaseAmount)
@@ -300,11 +289,42 @@ export function RequestDetail() {
   async function handleComplete() {
     const ok = await confirm({
       title: 'Mark as completed?',
-      body: 'Confirm everything was delivered. This closes the request.',
+      body: 'All ordered item quantities have been received. This closes the request.',
       confirmLabel: 'Mark completed',
       tone: 'accent',
     })
     if (ok) await run('complete', () => completeRequest(req.id), 'Request marked as completed, all done here', 'Could not complete this request')
+  }
+
+  async function handleReceive() {
+    const receiptItems = items
+      .flatMap((item) => {
+        const quantity = receiptQuantities[item.id]?.trim()
+        if (!quantity) return []
+        return [{
+          purchase_item_id: item.id,
+          quantity_received: Number(quantity),
+          quantity_remaining: Number(item.quantity_remaining ?? item.quantity),
+        }]
+      })
+    if (!receiptItems.length || receiptItems.some((item) => !Number.isFinite(item.quantity_received) || item.quantity_received <= 0)) {
+      notify.warning('Enter a received quantity for at least one item')
+      return
+    }
+    if (receiptItems.some((item) => item.quantity_received > item.quantity_remaining)) {
+      notify.warning('A received quantity cannot exceed the remaining quantity')
+      return
+    }
+    const saved = await run(
+      'receive',
+      () => recordReceipt(req.id, receiptItems.map((item) => ({
+        purchase_item_id: item.purchase_item_id,
+        quantity_received: item.quantity_received,
+      }))),
+      'Delivery quantities recorded',
+      'Could not record this delivery',
+    )
+    if (saved) setReceiptQuantities({})
   }
 
   async function handleUploadDocument() {
@@ -392,24 +412,26 @@ export function RequestDetail() {
           <div className="min-w-0 flex-1">
             <h1 className="text-[clamp(1.9rem,4vw,3rem)] leading-[1.02] font-black tracking-[-0.035em] break-words text-[var(--ink)]">{req.title}</h1>
             <p className="mt-2 text-sm text-[var(--ink-soft)]">
-              {req.project?.name} · {req.department}
+              {[req.project?.name, req.department].filter(Boolean).join(' · ')}
             </p>
           </div>
-          <div className="sm:text-right">
-            <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">{headline.label}</p>
-            <p className="text-[clamp(2.2rem,5vw,3.5rem)] leading-none font-black tracking-tight text-[var(--ink)]">{formatCurrency(headline.value)}</p>
-            {amounts.length > 1 && (
-              <p className="mt-1 text-xs text-slate-500">
-                {amounts
-                  .slice(0, -1)
-                  .map((a) => `${a.label} ${formatCurrency(a.value)}`)
-                  .join(' · ')}
-              </p>
-            )}
-          </div>
+          {!isShopkeeper && headline && (
+            <div className="sm:text-right">
+              <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">{headline.label}</p>
+              <p className="text-[clamp(2.2rem,5vw,3.5rem)] leading-none font-black tracking-tight text-[var(--ink)]">{formatCurrency(headline.value)}</p>
+              {amounts.length > 1 && (
+                <p className="mt-1 text-xs text-slate-500">
+                  {amounts
+                    .slice(0, -1)
+                    .map((a) => `${a.label} ${formatCurrency(a.value)}`)
+                    .join(' · ')}
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-4 border-t border-black/[0.06] pt-6 md:grid-cols-4">
+        {!isShopkeeper && <div className="mt-6 grid grid-cols-2 gap-4 border-t border-black/[0.06] pt-6 md:grid-cols-4">
           <Meta label="Requester">
             <span className="flex items-center gap-2">
               {req.requester && <Avatar initials={req.requester.avatar_initials} size={26} />}
@@ -418,10 +440,10 @@ export function RequestDetail() {
           </Meta>
           <Meta label="Role">{req.requester ? ROLE_LABELS[req.requester.role] : '—'}</Meta>
           <Meta label="Needed by">{req.required_date ? format(new Date(`${req.required_date}T00:00`), 'MMM d, yyyy') : 'Not set'}</Meta>
-          <Meta label={req.submitted_at ? 'Submitted' : 'Created'}>{format(new Date(req.submitted_at ?? req.created_at), 'MMM d, yyyy')}</Meta>
-        </div>
+          {requestDate && <Meta label={req.submitted_at ? 'Submitted' : 'Created'}>{format(new Date(requestDate), 'MMM d, yyyy')}</Meta>}
+        </div>}
 
-        {req.return_note && EDITABLE_STATUSES.includes(req.status) && (
+        {!isShopkeeper && req.return_note && EDITABLE_STATUSES.includes(req.status) && (
           <div className="mt-5 flex items-start gap-3 rounded-2xl bg-[var(--sun-soft)] p-4 text-sm text-[var(--ink)]">
             <RotateCcw size={18} className="mt-0.5 shrink-0" />
             <p>
@@ -430,7 +452,7 @@ export function RequestDetail() {
           </div>
         )}
 
-        {req.rejection_reason && req.status === 'rejected' && (
+        {!isShopkeeper && req.rejection_reason && req.status === 'rejected' && (
           <div className="mt-5 flex items-start gap-3 rounded-2xl bg-[var(--accent-soft)] p-4 text-sm text-[var(--ink)]">
             <XIcon size={18} className="mt-0.5 shrink-0 text-[var(--accent)]" />
             <p>
@@ -443,7 +465,7 @@ export function RequestDetail() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
         {/* ── Main column ── */}
         <div className="order-2 min-w-0 space-y-4 lg:order-1">
-          {(req.description || req.justification) && (
+          {!isShopkeeper && (req.description || req.justification) && (
             <section className="grid grid-cols-1 gap-6 rounded-[1.75rem] bg-white p-6 sm:grid-cols-2 sm:p-8">
               <div>
                 <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Description</p>
@@ -462,51 +484,106 @@ export function RequestDetail() {
               <p className="text-sm text-slate-500">No line items listed.</p>
             ) : (
               <>
-                <div className="hidden grid-cols-[minmax(0,1fr)_6rem_7rem_7rem] gap-3 px-4 pb-2 text-xs font-medium tracking-wide text-slate-500 uppercase sm:grid">
+                <div className={clsx(
+                  'hidden gap-3 px-4 pb-2 text-xs font-medium tracking-wide text-slate-500 uppercase sm:grid',
+                  isShopkeeper ? 'grid-cols-[minmax(0,1fr)_7rem_7rem_9rem]' : 'grid-cols-[minmax(0,1fr)_6rem_7rem_7rem]',
+                )}>
                   <span>Item</span>
-                  <span className="text-right">Qty</span>
-                  <span className="text-right">Unit price (ETB)</span>
-                  <span className="text-right">Total</span>
+                  {isShopkeeper ? (
+                    <>
+                      <span className="text-right">Received</span>
+                      <span className="text-right">Remaining</span>
+                      <span className="text-right">Receive now</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-right">Qty</span>
+                      <span className="text-right">Unit price (ETB)</span>
+                      <span className="text-right">Total</span>
+                    </>
+                  )}
                 </div>
                 <ul className="space-y-2">
                   {items.map((item) => {
                     const total = Number(item.quantity) * Number(item.estimated_unit_price ?? 0)
+                    const received = Number(item.received_quantity ?? 0)
+                    const remaining = Number(item.quantity_remaining ?? item.quantity)
                     return (
                       <li
                         key={item.id}
-                        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-2xl bg-[var(--canvas)] px-4 py-3 sm:grid-cols-[minmax(0,1fr)_6rem_7rem_7rem]"
+                        className={clsx(
+                          'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 rounded-2xl bg-[var(--canvas)] px-4 py-3 sm:grid-cols-[minmax(0,1fr)_6rem_7rem_7rem]',
+                          isShopkeeper && 'sm:grid-cols-[minmax(0,1fr)_7rem_7rem_9rem]',
+                        )}
                       >
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-[var(--ink)]">{item.name}</p>
                           {item.description && <p className="truncate text-xs text-slate-500">{item.description}</p>}
-                          <p className="text-xs text-slate-500 sm:hidden">
+                          {!isShopkeeper && <p className="text-xs text-slate-500 sm:hidden">
                             {Number(item.quantity).toLocaleString()} {item.unit}
                             {item.estimated_unit_price != null && ` × ${formatCurrency(item.estimated_unit_price)}`}
-                          </p>
+                          </p>}
                         </div>
-                        <span className="hidden text-right text-sm text-[var(--ink-soft)] sm:block">
-                          {Number(item.quantity).toLocaleString()} {item.unit}
-                        </span>
-                        <span className="hidden text-right text-sm text-[var(--ink-soft)] sm:block">
-                          {item.estimated_unit_price != null ? formatCurrency(item.estimated_unit_price) : '—'}
-                        </span>
-                        <span className="text-right text-sm font-bold text-[var(--ink)]">{total > 0 ? formatCurrency(total) : '—'}</span>
+                        {isShopkeeper ? (
+                          <>
+                            <span className="text-right text-sm text-[var(--ink-soft)]">
+                              <span className="block text-[10px] uppercase text-slate-400 sm:hidden">Received</span>
+                              {received.toLocaleString()} {item.unit}
+                            </span>
+                            <span className="text-right text-sm font-semibold text-[var(--ink)]">
+                              <span className="block text-[10px] uppercase text-slate-400 sm:hidden">Remaining</span>
+                              {remaining.toLocaleString()} {item.unit}
+                            </span>
+                            <div>
+                              <span className="block text-[10px] uppercase text-slate-400 sm:hidden">Receive now</span>
+                              <input
+                                aria-label={`Quantity received now for ${item.name}`}
+                                type="number"
+                                min="0"
+                                max={remaining}
+                                step="0.01"
+                                value={receiptQuantities[item.id] ?? ''}
+                                onChange={(event) => setReceiptQuantities((current) => ({ ...current, [item.id]: event.target.value }))}
+                                disabled={remaining <= 0 || req.status === 'completed'}
+                                className="field h-10 min-w-0 !px-2 !py-0 text-right"
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <span className="hidden text-right text-sm text-[var(--ink-soft)] sm:block">
+                              {Number(item.quantity).toLocaleString()} {item.unit}
+                            </span>
+                            <span className="hidden text-right text-sm text-[var(--ink-soft)] sm:block">
+                              {item.estimated_unit_price != null ? formatCurrency(item.estimated_unit_price) : '—'}
+                            </span>
+                            <span className="text-right text-sm font-bold text-[var(--ink)]">{total > 0 ? formatCurrency(total) : '—'}</span>
+                          </>
+                        )}
                       </li>
                     )
                   })}
                 </ul>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-black/[0.06] px-4 pt-3">
+                {!isShopkeeper && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-black/[0.06] px-4 pt-3">
                   <span className="text-sm text-[var(--ink-soft)]">
                     Items total
                     {itemsTotal > 0 && Math.abs(itemsTotal - Number(req.estimated_amount)) > 0.005 && ` · estimate ${formatCurrency(req.estimated_amount)}`}
                   </span>
                   <span className="text-xl font-black tracking-tight text-[var(--ink)]">{formatCurrency(itemsTotal)}</span>
-                </div>
+                </div>}
               </>
+            )}
+            {isShopkeeper && ['purchased', 'partially_received'].includes(req.status) && items.length > 0 && (
+              <div className="mt-5 border-t border-black/[0.06] pt-4">
+                <Button onClick={handleReceive} loading={busy === 'receive'} className="w-full sm:w-auto">
+                  <PackageCheck size={17} />
+                  Record received quantities
+                </Button>
+              </div>
             )}
           </section>
 
-          <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
+          {!isShopkeeper && <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
             <SectionTitle
               title="Vendor quotations"
               count={quotes.length}
@@ -526,7 +603,7 @@ export function RequestDetail() {
               <div className="space-y-2">
                 {quotes.map((q) => {
                   const diff = lowest !== null ? Number(q.amount) - lowest : 0
-                  const expired = !!q.valid_until && new Date(`${q.valid_until}T23:59`) < new Date()
+                  const expired = q.valid_until ? new Date(`${q.valid_until}T23:59`) < new Date() : false
                   return (
                     <div
                       key={q.id}
@@ -594,7 +671,7 @@ export function RequestDetail() {
                     step="0.01"
                     value={quoteForm.amount}
                     onChange={(e) => setQuoteForm((f) => ({ ...f, amount: e.target.value }))}
-                    placeholder="Amount ($)"
+                    placeholder="Amount (ETB)"
                     aria-label="Quoted amount"
                     className="field h-11 !py-0"
                   />
@@ -635,9 +712,9 @@ export function RequestDetail() {
                 </div>
               </div>
             )}
-          </section>
+          </section>}
 
-          <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
+          {!isShopkeeper && <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
             <SectionTitle title="Documents" count={req.attachments?.length ?? 0} />
             <div className="space-y-2">
               {req.attachments && req.attachments.length > 0 ? (
@@ -678,7 +755,7 @@ export function RequestDetail() {
                 Upload
               </Button>
             </div>
-          </section>
+          </section>}
         </div>
 
         {/* ── Side column: actions first so approvers see them immediately ── */}
@@ -691,12 +768,16 @@ export function RequestDetail() {
                 </span>
                 <p className="mt-3 text-2xl leading-tight font-black text-white">Ready to submit?</p>
                 <p className="mt-1 text-sm text-white/60">
-                  {quotes.length === 0 ? 'Add at least one vendor quote before sending it to Finance.' : 'Finance reviews it first, then the GM and Owner.'}
+                  {quotes.length === 0
+                    ? 'Add at least one vendor quote before submitting for review.'
+                    : role === 'project_manager'
+                      ? 'Finance reviews this request after you submit it.'
+                      : 'Submit this request to the assigned Project Manager. Project Manager requests go directly to Finance.'}
                 </p>
                 <div className="mt-5 flex flex-col gap-2">
                   <Button variant="accent" onClick={handleSubmit} loading={busy === 'submit'} disabled={quotes.length === 0} className="h-12">
                     <Send size={17} />
-                    Submit for Finance review
+                    Submit for review
                   </Button>
                   <Link
                     to={{ search: `?edit=${req.id}` }}
@@ -723,7 +804,7 @@ export function RequestDetail() {
                   <label className="mt-4 block">
                     <span className="text-xs text-white/60">Approved amount{selectedQuote ? ' · from the selected quote' : ''}</span>
                     <span className="mt-1.5 flex items-center gap-1 rounded-2xl bg-white/10 px-4 py-2.5 focus-within:ring-2 focus-within:ring-[var(--sun)]">
-                      <span className="text-lg font-bold text-white/50">$</span>
+                      <span className="text-sm font-bold text-white/50">ETB</span>
                       <input
                         type="number"
                         inputMode="decimal"
@@ -740,10 +821,6 @@ export function RequestDetail() {
                   <Button variant="accent" onClick={handleApprove} loading={busy === 'approve'} className="h-12">
                     <Check size={18} strokeWidth={2.5} />
                     Approve
-                  </Button>
-                  <Button onClick={handleReturn} loading={busy === 'return'} className="h-12 border border-white/20 !bg-transparent hover:!bg-white/10">
-                    <CornerUpLeft size={16} />
-                    Send back for changes
                   </Button>
                   <Button onClick={handleReject} loading={busy === 'reject'} className="h-12 !bg-transparent text-white/70 hover:!bg-white/10 hover:text-white">
                     <XIcon size={16} />
@@ -783,26 +860,26 @@ export function RequestDetail() {
             </section>
           )}
 
-          {req.status === 'purchased' && canComplete && (
+          {canComplete && (
             <section className="rounded-[1.75rem] bg-white p-6">
               <SectionTitle title="Close it out" />
-              <p className="mb-4 text-sm text-[var(--ink-soft)]">Everything delivered? Mark the request complete.</p>
+              <p className="mb-4 text-sm text-[var(--ink-soft)]">All item quantities are received. Mark the request complete.</p>
               <Button onClick={handleComplete} loading={busy === 'complete'} className="w-full">
                 Mark as completed
               </Button>
             </section>
           )}
 
-          <section className="rounded-[1.75rem] bg-white p-6">
+          {!isShopkeeper && <section className="rounded-[1.75rem] bg-white p-6">
             <SectionTitle title="Approval trail" />
             <ol className="space-y-5">
-              {(['finance', 'gm', 'owner'] as const).map((stage, i) => {
+              {approvalStages.map((stage, i) => {
                 const approval = req.approvals?.find((a) => a.stage === stage)
                 const decision = approval?.decision ?? 'pending'
                 const current = currentStage === stage
                 return (
                   <li key={stage} className="relative flex gap-3">
-                    {i < 2 && <span className="absolute top-10 bottom-[-1.25rem] left-[1.1rem] w-px bg-black/10" />}
+                    {i < approvalStages.length - 1 && <span className="absolute top-10 bottom-[-1.25rem] left-[1.1rem] w-px bg-black/10" />}
                     <span
                       className={clsx(
                         'relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
@@ -840,7 +917,7 @@ export function RequestDetail() {
                 )
               })}
             </ol>
-          </section>
+          </section>}
         </div>
       </div>
     </div>

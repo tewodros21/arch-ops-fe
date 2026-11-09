@@ -196,7 +196,7 @@ export function VendorDetail() {
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm text-white">{q.request?.title}</p>
                           <p className="text-xs text-white/45">
-                            {q.request?.request_number} · {q.request && format(new Date(q.request.created_at), 'MMM d, yyyy')}
+                            {q.request?.request_number} · {q.request?.created_at && format(new Date(q.request.created_at), 'MMM d, yyyy')}
                           </p>
                         </div>
                         <span className="shrink-0 text-sm font-semibold text-white">

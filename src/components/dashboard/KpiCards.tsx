@@ -8,9 +8,13 @@ import { approvedValue, compactMoney, DONE, IN_REVIEW, isOverdue, isStuck, money
 
 const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
   employee: null,
+  ceo: null,
+  project_manager: 'awaiting_pm',
+  site_engineer: null,
+  shopkeeper: null,
   finance: 'awaiting_finance',
-  general_manager: 'awaiting_gm',
-  owner: 'awaiting_owner',
+  general_manager: null,
+  owner: null,
   admin: null,
 }
 
@@ -82,13 +86,16 @@ export function KpiCards({
     }
   }
 
-  const purchasedThisMonth = scoped.filter((r) => PAID.includes(r.status) && isSameMonth(new Date(r.updated_at ?? r.created_at), now))
+  const purchasedThisMonth = scoped.filter((r) => {
+    const updatedAt = r.updated_at ?? r.created_at
+    return PAID.includes(r.status) && !!updatedAt && isSameMonth(new Date(updatedAt), now)
+  })
   const purchasedValue = purchasedThisMonth.reduce((s, r) => s + Number(r.actual_amount ?? r.approved_amount ?? r.estimated_amount ?? 0), 0)
 
   const approved = scoped.filter((r) => DONE.includes(r.status))
   const approvedTotal = approved.reduce((s, r) => s + approvedValue(r), 0)
 
-  const myLabor = profile.role === 'employee' ? labor.filter((l) => l.requested_by === profile.id) : labor
+  const myLabor = ['employee', 'site_engineer'].includes(profile.role) ? labor.filter((l) => l.requested_by === profile.id) : labor
   const activeLabor = myLabor.filter((l) => !['completed', 'cancelled'].includes(l.status))
   const workers = activeLabor.reduce((s, l) => s + Number(l.workers_required ?? 0), 0)
 

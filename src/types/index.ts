@@ -1,17 +1,26 @@
-export type Role = 'employee' | 'finance' | 'general_manager' | 'owner' | 'admin'
+export type Role =
+  | 'employee'
+  | 'finance'
+  | 'general_manager'
+  | 'owner'
+  | 'admin'
+  | 'ceo'
+  | 'project_manager'
+  | 'site_engineer'
+  | 'shopkeeper'
 
 export type RequestStatus =
   | 'draft'
   | 'quote_received'
+  | 'awaiting_pm'
   | 'awaiting_finance'
-  | 'awaiting_gm'
-  | 'awaiting_owner'
   | 'approved'
   | 'rejected'
   | 'purchased'
+  | 'partially_received'
   | 'completed'
 
-export type ApprovalStage = 'finance' | 'gm' | 'owner'
+export type ApprovalStage = 'project_manager' | 'finance' | 'gm' | 'owner'
 export type ApprovalDecision = 'pending' | 'approved' | 'rejected'
 
 export interface Profile {
@@ -20,6 +29,7 @@ export interface Profile {
   full_name: string
   role: Role
   department: string | null
+  assigned_project_ids?: string[]
   is_active: boolean
   avatar_initials: string
 }
@@ -28,10 +38,10 @@ export interface Project {
   id: string
   name: string
   code: string
-  client_name: string | null
+  client_name?: string | null
   location?: string | null
   budget?: number | null
-  is_active: boolean
+  is_active?: boolean
   /** Approved or paid spend across the project's requests (filled on admin lists) */
   spent_amount?: number
 }
@@ -64,7 +74,9 @@ export interface PurchaseItem {
   description?: string | null
   quantity: number
   unit: string
-  estimated_unit_price: number | null
+  estimated_unit_price?: number | null
+  received_quantity?: number
+  quantity_remaining?: number
 }
 
 export interface VendorQuotation {
@@ -110,24 +122,24 @@ export interface PurchaseRequest {
   id: string
   request_number: string
   title: string
-  description: string
+  description?: string
   project_id: string
   project?: Project
-  department: string
-  requester_id: string
+  department?: string
+  requester_id?: string
   requester?: Profile
-  required_date: string | null
-  estimated_amount: number
-  approved_amount: number | null
-  actual_amount: number | null
-  justification: string
+  required_date?: string | null
+  estimated_amount?: number
+  approved_amount?: number | null
+  actual_amount?: number | null
+  justification?: string
   status: RequestStatus
-  rejection_reason: string | null
+  rejection_reason?: string | null
   /** Set when an approver sends the request back for changes */
   return_note?: string | null
   submitted_at?: string | null
-  created_at: string
-  updated_at: string
+  created_at?: string
+  updated_at?: string
   items?: PurchaseItem[]
   quotations?: VendorQuotation[]
   approvals?: Approval[]

@@ -7,25 +7,26 @@ import { SiteHeader } from '@/components/layout/SiteHeader'
 import { AssetSlot } from '@/components/ui'
 import { ROLE_LABELS, type Role } from '@/types'
 
-const WORKFLOW = ['Request', 'Quote', 'Finance', 'GM', 'Owner', 'Purchase', 'Complete']
+const WORKFLOW = ['Request', 'Quote', 'Project Manager', 'Finance', 'Purchase', 'Partial receipt', 'Complete']
 
 const STAGES = [
-  { n: '01', title: 'Finance', body: 'Checks pricing and budget before anything moves. The first gate on every spend.' },
-  { n: '02', title: 'General Manager', body: 'Confirms the work is operationally justified on site.' },
-  { n: '03', title: 'Owner', body: 'Final sign-off where required, with the full financial picture.' },
+  { n: '01', title: 'Project Manager', body: 'Reviews requests for assigned projects. A Project Manager’s own requests go straight to Finance.' },
+  { n: '02', title: 'Finance', body: 'Reviews the request, approves the amount, and records the purchase.' },
+  { n: '03', title: 'Shopkeeper', body: 'Records deliveries by item and quantity, including partial receipts, without seeing financial details.' },
 ]
 
 // Role cards: drop cut-out PNGs (transparent background) into public/assets/roles/
 const ROLES: { role: Role; blurb: string; bg: string; fg: string }[] = [
-  { role: 'employee', blurb: 'Raises requests, attaches quotes and tracks status without chasing anyone.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
-  { role: 'finance', blurb: 'Reviews pricing and budget. The first checkpoint on every spend.', bg: 'var(--sun)', fg: 'var(--ink)' },
-  { role: 'general_manager', blurb: 'Makes sure the work is justified before it reaches final sign-off.', bg: 'var(--accent)', fg: '#ffffff' },
-  { role: 'owner', blurb: 'Gives final approval and sees spend across every project.', bg: 'var(--panel-dark)', fg: '#ffffff' },
+  { role: 'site_engineer', blurb: 'Creates project purchase requests with items, quantities, estimates and vendor quotes.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
+  { role: 'project_manager', blurb: 'Reviews requests for assigned projects before they go to Finance.', bg: 'var(--sun)', fg: 'var(--ink)' },
+  { role: 'finance', blurb: 'Reviews pricing, approves the spend and records the purchase.', bg: 'var(--accent)', fg: '#ffffff' },
+  { role: 'shopkeeper', blurb: 'Tracks item deliveries and records full or partial quantities received.', bg: 'var(--panel-dark)', fg: '#ffffff' },
+  { role: 'ceo', blurb: 'Creates requests and gets visibility across project purchasing.', bg: '#d9e8e4', fg: 'var(--ink)' },
   { role: 'admin', blurb: 'Runs users, projects, vendors and the rules the workflow follows.', bg: '#e6e1da', fg: 'var(--ink)' },
 ]
 
 const BEFORE = ['Phone calls for every request', 'Screenshots as the only record', 'No idea what is pending or late', 'Manual follow-ups on every purchase']
-const AFTER = ['One request, routed automatically', 'Quotes and receipts attached', 'Live view of pending and delayed spend', 'Audit trail nobody can edit']
+const AFTER = ['Project Manager → Finance approvals', 'Quotes and purchase records attached', 'Partial deliveries tracked by item quantity', 'Audit trail nobody can edit']
 
 export function Home() {
   const { profile } = useAuth()
@@ -106,7 +107,7 @@ export function Home() {
                 <ArrowRight size={20} />
               </a>
               <p className="ml-1 max-w-xs text-sm text-[var(--ink-soft)]">
-                Requests, quotes and three-level approvals in one clear record.
+                Project Manager and Finance approvals, with deliveries tracked by item.
               </p>
             </div>
           </div>
@@ -129,7 +130,7 @@ export function Home() {
               </span>
               <div>
                 <p className="text-sm font-semibold">PR-2026-014 approved</p>
-                <p className="text-xs text-white/60">Finance → GM → Owner</p>
+                <p className="text-xs text-white/60">Project Manager → Finance</p>
               </div>
             </div>
           </div>
@@ -147,11 +148,11 @@ export function Home() {
 
             <div className="flex flex-col justify-between rounded-[2rem] bg-[var(--sun)] p-7">
               <p className="text-xl leading-snug font-semibold text-[var(--ink)]">
-                Five roles, one workflow, and everyone knows what's waiting on them.
+                Six roles, one workflow, and everyone knows what's waiting on them.
               </p>
               <div className="mt-6 flex items-center justify-between gap-3">
                 <div className="flex -space-x-2">
-                  {['EM', 'FI', 'GM', 'OW', 'AD'].map((i, idx) => (
+                  {['SE', 'PM', 'FI', 'SK', 'CEO', 'AD'].map((i, idx) => (
                     <span
                       key={i}
                       className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-[var(--sun)] text-xs font-bold"
@@ -193,7 +194,7 @@ export function Home() {
             <div>
               <p className="text-sm font-semibold tracking-[0.2em] text-[var(--accent)] uppercase">The workflow</p>
               <h2 className="mt-4 text-[clamp(2.5rem,5vw,4.75rem)] leading-[0.92] font-black tracking-[-0.04em] text-[var(--ink)]">
-                Three sign-offs. Zero chasing.
+                Project review. Finance approval. Delivery tracked.
               </h2>
             </div>
             <AssetSlot src="/assets/3d/workflow.png" label="Workflow 3D asset" className="mt-6 h-72 w-full sm:h-80 lg:-mx-4 lg:w-[calc(100%+2rem)]" />
@@ -236,7 +237,7 @@ export function Home() {
             <p className="max-w-xs text-sm text-[var(--ink-soft)]">Each role sees exactly what's waiting on them, and nothing they shouldn't.</p>
           </div>
 
-          <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
             {ROLES.map((r) => (
               <article
                 key={r.role}

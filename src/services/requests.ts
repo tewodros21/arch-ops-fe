@@ -46,8 +46,8 @@ export async function countPurchaseRequests(filter: PurchaseCountFilter): Promis
   return data ?? 0
 }
 
-export function fetchProjects() {
-  return backend.projects.list({ activeOnly: true })
+export function fetchProjects(activeOnly = true) {
+  return backend.projects.list({ activeOnly })
 }
 
 export async function fetchActiveVendors(): Promise<Vendor[]> {

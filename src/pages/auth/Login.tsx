@@ -159,7 +159,7 @@ export function Login() {
             <AssetSlot src="/assets/3d/login.png" label="Login 3D asset" dark className="h-full max-h-[28rem] w-full" />
           </div>
           <p className="relative flex items-center gap-2 text-sm text-white/60">
-            Requests <ArrowRight size={14} /> Finance <ArrowRight size={14} /> GM <ArrowRight size={14} /> Owner
+            Request <ArrowRight size={14} /> Project Manager <ArrowRight size={14} /> Finance <ArrowRight size={14} /> Delivery
           </p>
         </aside>
       </main>

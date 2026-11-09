@@ -25,14 +25,16 @@ export function BottomNav({ onMore }: { onMore: () => void }) {
         <Tab to={purchases.to} label={purchases.short} icon={purchases.icon} />
 
         <div className="flex justify-center">
-          <Link
-            to={{ search: create.search }}
-            aria-label={create.aria}
-            title={create.label}
-            className="focus-ring -mt-8 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-[0_10px_24px_-8px_var(--accent)] ring-4 ring-[var(--canvas)] transition-transform active:scale-95"
-          >
-            <create.icon size={22} strokeWidth={2.25} />
-          </Link>
+          {create && (
+            <Link
+              to={{ search: create.search }}
+              aria-label={create.aria}
+              title={create.label}
+              className="focus-ring -mt-8 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow-[0_10px_24px_-8px_var(--accent)] ring-4 ring-[var(--canvas)] transition-transform active:scale-95"
+            >
+              <create.icon size={22} strokeWidth={2.25} />
+            </Link>
+          )}
         </div>
 
         <Tab to={labor.to} label={labor.short} icon={labor.icon} />

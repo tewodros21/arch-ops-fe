@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Copy, RefreshCw, UserPlus } from 'lucide-react'
 import { notify } from '@/lib/notify'
-import { createUser, fetchDepartments } from '@/services'
-import { ROLE_LABELS, type Department, type Profile, type Role } from '@/types'
+import { createUser, fetchDepartments, fetchProjects } from '@/services'
+import { ROLE_LABELS, type Department, type Profile, type Project, type Role } from '@/types'
 import { Field, FormModal } from './FormModal'
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
@@ -22,12 +22,18 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Role>('employee')
   const [department, setDepartment] = useState('')
+  const [assignedProjectIds, setAssignedProjectIds] = useState<string[]>([])
   const [password, setPassword] = useState(generatePassword)
   const [departments, setDepartments] = useState<Department[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
   const [touched, setTouched] = useState(false)
 
   useEffect(() => {
-    fetchDepartments().then(setDepartments)
+    Promise.all([fetchDepartments(), fetchProjects(false)]).then(([departmentList, projectResult]) => {
+      setDepartments(departmentList)
+      if (projectResult.error) notify.error('Could not load projects for Project Manager assignment')
+      setProjects(projectResult.data ?? [])
+    })
   }, [])
 
   const errors = {
@@ -48,12 +54,17 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
   async function submit() {
     setTouched(true)
     if (!name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || password.length < MIN_PASSWORD) return false
+    if (role === 'project_manager' && assignedProjectIds.length === 0) {
+      notify.warning('Assign at least one project to this Project Manager')
+      return false
+    }
     const { data, error } = await createUser({
       email: email.trim().toLowerCase(),
       full_name: name.trim(),
       role,
       department: department || null,
       password,
+      assigned_project_ids: role === 'project_manager' ? assignedProjectIds : [],
     })
     if (error || !data) {
       notify.error(error?.code === 'conflict' ? 'Someone already uses that email' : `Could not add this person: ${error?.message ?? 'unknown error'}`)
@@ -106,6 +117,12 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
           </select>
         </Field>
       </div>
+      <ProjectAssignmentField
+        enabled={role === 'project_manager'}
+        projects={projects}
+        selected={assignedProjectIds}
+        onChange={setAssignedProjectIds}
+      />
       <Field label="Temporary password" htmlFor="u-password" error={errors.password}>
         <div className="flex gap-2">
           <input
@@ -140,5 +157,50 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
         Copy the password before you create the account and send it to them privately. It is not shown again.
       </p>
     </FormModal>
+  )
+}
+
+export function ProjectAssignmentField({
+  enabled,
+  projects,
+  selected,
+  onChange,
+}: {
+  enabled: boolean
+  projects: Project[]
+  selected: string[]
+  onChange: (ids: string[]) => void
+}) {
+  return (
+    <Field
+      label="Project Manager assignments"
+      htmlFor="u-projects"
+      hint={enabled ? 'Choose the project(s) this manager will review.' : 'Set the role to Project Manager above to assign review projects.'}
+    >
+      {!enabled ? (
+        <p className="rounded-xl bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink-soft)]">
+          Project assignments are only needed for Project Managers.
+        </p>
+      ) : projects.length === 0 ? (
+        <p className="rounded-xl bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink-soft)]">No active projects available.</p>
+      ) : (
+        <div id="u-projects" className="max-h-40 space-y-2 overflow-y-auto rounded-2xl border border-black/10 p-3">
+          {projects.map((project) => (
+            <label key={project.id} className="flex items-center gap-2 text-sm text-[var(--ink)]">
+              <input
+                type="checkbox"
+                checked={selected.includes(project.id)}
+                onChange={(event) => onChange(
+                  event.target.checked
+                    ? [...selected, project.id]
+                    : selected.filter((id) => id !== project.id),
+                )}
+              />
+              {project.name} <span className="text-xs text-slate-500">{project.code}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </Field>
   )
 }

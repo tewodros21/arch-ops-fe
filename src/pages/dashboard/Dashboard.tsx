@@ -6,7 +6,7 @@ import { differenceInCalendarDays, format, isSameDay, startOfDay, subDays } from
 import { CalendarDays, Clock, Copy, HardHat, MapPin, MoreVertical } from 'lucide-react'
 import { fetchAuditEvents, fetchLaborRequests, fetchPurchaseRequests } from '@/services'
 import { useAuth } from '@/context/AuthContext'
-import { Avatar } from '@/components/ui'
+import { Avatar, StatusBadge } from '@/components/ui'
 import { KpiCards } from '@/components/dashboard/KpiCards'
 import { SpendCharts } from '@/components/dashboard/SpendCharts'
 import { RangeSelect } from '@/components/dashboard/kit'
@@ -25,9 +25,13 @@ import {
 
 const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
   employee: null,
+  ceo: null,
+  project_manager: 'awaiting_pm',
+  site_engineer: null,
+  shopkeeper: null,
   finance: 'awaiting_finance',
-  general_manager: 'awaiting_gm',
-  owner: 'awaiting_owner',
+  general_manager: null,
+  owner: null,
   admin: null,
 }
 
@@ -35,19 +39,19 @@ const PIPELINE: { title: string; statuses: RequestStatus[] }[] = [
   { title: 'New', statuses: ['draft', 'quote_received'] },
   { title: 'In review', statuses: IN_REVIEW },
   { title: 'Approved', statuses: ['approved'] },
-  { title: 'Completed', statuses: ['purchased', 'completed'] },
+  { title: 'Delivery & completed', statuses: ['purchased', 'partially_received', 'completed'] },
 ]
 
 // How far along the approval chain a request is, for the progress bars
 const PROGRESS: Record<RequestStatus, number> = {
   draft: 8,
   quote_received: 20,
+  awaiting_pm: 38,
   awaiting_finance: 40,
-  awaiting_gm: 62,
-  awaiting_owner: 84,
   approved: 100,
   rejected: 100,
   purchased: 100,
+  partially_received: 100,
   completed: 100,
 }
 
@@ -86,6 +90,11 @@ export function Dashboard() {
 
   useEffect(() => {
     async function load() {
+      if (profile?.role === 'shopkeeper') {
+        setRequests(await fetchPurchaseRequests())
+        setLoading(false)
+        return
+      }
       const since = startOfDay(subDays(new Date(), 89)).toISOString()
       const [reqs, laborRows, events] = await Promise.all([
         fetchPurchaseRequests(),
@@ -98,7 +107,7 @@ export function Dashboard() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [profile?.role])
 
   if (!profile) return null
 
@@ -107,6 +116,62 @@ export function Dashboard() {
   const priority = (awaitingStatus ? requests.filter((r) => r.status === awaitingStatus) : scoped.filter((r) => !DONE.includes(r.status) && r.status !== 'rejected'))
     .slice()
     .sort((a, b) => (a.required_date ?? '9999').localeCompare(b.required_date ?? '9999'))
+
+  if (profile.role === 'shopkeeper') {
+    const deliveries = requests.filter((request) =>
+      ['purchased', 'partially_received', 'completed'].includes(request.status),
+    )
+    return (
+      <div className="space-y-5">
+        <section className="panel-dark rounded-[1.75rem] p-6 text-white sm:p-8">
+          <p className="text-sm text-white/60">Shopkeeper workspace</p>
+          <h1 className="mt-2 text-3xl font-black">Delivery tracking</h1>
+          <p className="mt-2 text-sm text-white/70">Record deliveries by item quantity. Financial details are hidden.</p>
+          <p className="mt-5 text-4xl font-black">{loading ? '–' : deliveries.filter((r) => r.status !== 'completed').length}</p>
+          <p className="text-xs text-white/60">open delivery requests</p>
+        </section>
+        <section className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-2xl font-normal text-[var(--ink)]">Requests to receive</h2>
+            <span className="text-sm text-slate-500">{deliveries.length} total</span>
+          </div>
+          {loading && <p className="rounded-2xl bg-white p-6 text-sm text-slate-500">Loading delivery requests…</p>}
+          {!loading && deliveries.length === 0 && (
+            <p className="rounded-[1.5rem] bg-white p-8 text-center text-sm text-slate-500">No purchased requests are waiting for delivery.</p>
+          )}
+          {deliveries.map((request) => (
+            <Link
+              key={request.id}
+              to={`/requests/${request.id}`}
+              className="focus-ring block rounded-[1.5rem] bg-white p-5 transition-transform hover:-translate-y-0.5 sm:p-6"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-slate-500">{request.request_number} · {request.project?.name}</p>
+                  <h3 className="mt-1 text-lg font-bold text-[var(--ink)]">{request.title}</h3>
+                </div>
+                <StatusBadge status={request.status} />
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {(request.items ?? []).map((item) => (
+                  <p key={item.id} className="rounded-xl bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink-soft)]">
+                    <span className="font-semibold text-[var(--ink)]">{item.name}</span>
+                    <span className="ml-2">{Number(item.received_quantity ?? 0).toLocaleString()} / {Number(item.quantity).toLocaleString()} {item.unit}</span>
+                    {Number(item.quantity_remaining ?? item.quantity) > 0 && (
+                      <span className="ml-2 text-[var(--accent)]">
+                        · {Number(item.quantity_remaining ?? item.quantity).toLocaleString()} remaining
+                      </span>
+                    )}
+                  </p>
+                ))}
+              </div>
+              <p className="mt-4 text-sm font-semibold text-[var(--accent)]">Open delivery details →</p>
+            </Link>
+          ))}
+        </section>
+      </div>
+    )
+  }
 
   // ── Request volume for the selected range ──
   const today = startOfDay(new Date())
@@ -117,6 +182,7 @@ export function Dashboard() {
     const start = subDays(today, requestRangeDays - 1 - i * bucketSize)
     const end = i === bucketCount - 1 ? today : subDays(today, requestRangeDays - 1 - i * bucketSize - (bucketSize - 1))
     const onBucket = scoped.filter((r) => {
+      if (!r.created_at) return false
       const created = startOfDay(new Date(r.created_at))
       return created >= start && created <= end
     })
@@ -127,9 +193,10 @@ export function Dashboard() {
       other: onBucket.filter((r) => !DONE.includes(r.status) && !IN_REVIEW.includes(r.status)).length,
     }
   })
-  const currentCount = scoped.filter((r) => new Date(r.created_at) >= requestRangeStart).length
+  const currentCount = scoped.filter((r) => !!r.created_at && new Date(r.created_at) >= requestRangeStart).length
   const previousStart = subDays(requestRangeStart, requestRangeDays)
   const previousCount = scoped.filter((r) => {
+    if (!r.created_at) return false
     const d = new Date(r.created_at)
     return d >= previousStart && d < requestRangeStart
   }).length
@@ -269,7 +336,7 @@ export function Dashboard() {
               <Link key={r.id} to={`/requests/${r.id}`} className="focus-ring block rounded-lg">
                 <p className="truncate text-[15px] text-[var(--ink)]">{r.title}</p>
                 <div className="mt-0.5 flex items-center justify-between text-xs text-slate-500">
-                  <span className={clsx(isOverdue(r) && 'text-[var(--accent)]')}>{dueLabel(r.required_date)}</span>
+                  <span className={clsx(isOverdue(r) && 'text-[var(--accent)]')}>{dueLabel(r.required_date ?? null)}</span>
                   <span className="text-[var(--ink)]">{PROGRESS[r.status]}%</span>
                 </div>
                 <div className="mt-2 h-1 rounded-full bg-[var(--cell)]">
@@ -412,7 +479,7 @@ function RequestCard({ request: r }: { request: PurchaseRequest }) {
       <Link to={`/requests/${r.id}`} className={clsx('flex items-center justify-between border-t px-5 py-3.5 text-sm', dark ? 'border-white/10' : 'border-black/[0.06]')}>
         <span className="flex items-center gap-2">
           <CalendarDays size={16} strokeWidth={1.75} />
-          {dueLabel(r.required_date)}
+          {dueLabel(r.required_date ?? null)}
         </span>
         <span className="font-medium">{money(Number(r.approved_amount ?? r.estimated_amount ?? 0))}</span>
       </Link>

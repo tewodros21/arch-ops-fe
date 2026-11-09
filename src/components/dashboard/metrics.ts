@@ -4,9 +4,9 @@ import { formatCurrency } from '@/utils'
 
 export const COLORS = { ink: '#181412', sun: '#f6b73c', accent: '#e4532d', stone: '#8a7f78', sand: '#e6e1da' }
 
-export const IN_REVIEW: RequestStatus[] = ['awaiting_finance', 'awaiting_gm', 'awaiting_owner']
-export const DONE: RequestStatus[] = ['approved', 'purchased', 'completed']
-export const PAID: RequestStatus[] = ['purchased', 'completed']
+export const IN_REVIEW: RequestStatus[] = ['awaiting_pm', 'awaiting_finance']
+export const DONE: RequestStatus[] = ['approved', 'purchased', 'partially_received', 'completed']
+export const PAID: RequestStatus[] = ['purchased', 'partially_received', 'completed']
 
 /** Hours a request can sit in one approval stage before it counts as delayed */
 export const STUCK_HOURS = 48
@@ -30,7 +30,8 @@ export function isOverdue(r: PurchaseRequest) {
 }
 
 export function isStuck(r: PurchaseRequest, now = new Date()) {
-  return IN_REVIEW.includes(r.status) && differenceInHours(now, new Date(r.updated_at ?? r.created_at)) >= STUCK_HOURS
+  const updatedAt = r.updated_at ?? r.created_at
+  return IN_REVIEW.includes(r.status) && !!updatedAt && differenceInHours(now, new Date(updatedAt)) >= STUCK_HOURS
 }
 
 export function isDelayed(r: PurchaseRequest) {

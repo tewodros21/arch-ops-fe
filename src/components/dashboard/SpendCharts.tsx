@@ -57,8 +57,11 @@ export function SpendCharts({ scoped, loading }: { scoped: PurchaseRequest[]; lo
   const trend = months.map((m) => ({
     month: format(m, 'MMM'),
     fullName: format(m, 'MMMM yyyy'),
-    approved: scoped.filter((r) => isSameMonth(new Date(r.created_at), m)).reduce((s, r) => s + approvedValue(r), 0),
-    paid: scoped.filter((r) => isSameMonth(new Date(r.updated_at ?? r.created_at), m)).reduce((s, r) => s + paidValue(r), 0),
+    approved: scoped.filter((r) => !!r.created_at && isSameMonth(new Date(r.created_at), m)).reduce((s, r) => s + approvedValue(r), 0),
+    paid: scoped.filter((r) => {
+      const updatedAt = r.updated_at ?? r.created_at
+      return !!updatedAt && isSameMonth(new Date(updatedAt), m)
+    }).reduce((s, r) => s + paidValue(r), 0),
   }))
   const trendApproved = trend.reduce((s, t) => s + t.approved, 0)
   const trendPaid = trend.reduce((s, t) => s + t.paid, 0)

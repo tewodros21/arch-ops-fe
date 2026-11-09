@@ -533,7 +533,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                       step="0.01"
                       value={r.unit_price}
                       onChange={(e) => updateItem(i, { unit_price: e.target.value })}
-                      placeholder="Unit $"
+                      placeholder="Unit price ETB"
                       aria-label={`Item ${i + 1} estimated unit price`}
                       className={clsx(inputClass, 'border-transparent')}
                     />
@@ -575,7 +575,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 err(2, !(estimate > 0)) ? 'border-[var(--accent)]' : 'border-transparent',
               )}
             >
-              <span className="text-4xl font-black text-slate-300">$</span>
+              <span className="text-xl font-black text-slate-300">ETB</span>
               <input
                 type="number"
                 inputMode="decimal"
@@ -628,7 +628,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               value={form.justification}
               onChange={(e) => update('justification', e.target.value)}
               rows={4}
-              placeholder="Why is this needed? Finance reads this first."
+              placeholder="Why is this needed? Reviewers will use this to assess the request."
               className={clsx(inputClass, 'resize-none border-transparent')}
             />
           </Field>
@@ -713,7 +713,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                       type="number"
                       inputMode="decimal"
                       min="0"
-                      placeholder="Amount ($)"
+                      placeholder="Amount (ETB)"
                       aria-label="Quoted amount"
                       value={q.amount}
                       onChange={(e) => updateQuotation(i, { amount: e.target.value })}
@@ -829,7 +829,9 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--sun)]">
                 <ArrowRight size={16} />
               </span>
-              Submitting sends it to Finance first, then the General Manager and Owner.
+              {profile?.role === 'project_manager'
+                ? 'Submitting sends this request directly to Finance for review.'
+                : 'Submitting sends this request to the assigned Project Manager, then Finance.'}
             </div>
           )}
         </>

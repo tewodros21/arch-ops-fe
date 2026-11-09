@@ -1,6 +1,6 @@
 import type { AppNotification, AuditEvent, Department, LaborRequest, Profile, Project, PurchaseRequest, Vendor } from '@/types'
 import { hasSession, http, list, onSessionChange, refreshToken, request, setTokens, type Page } from './http'
-import type { Backend, Result, VendorHistory } from './types'
+import type { Backend, ReceiptInput, Result, VendorHistory } from './types'
 
 // Data source for the Django REST API. Every path, body and response here is specified in
 // public/docs/openapi.yaml; the server enforces roles, the approval workflow, audit and notifications.
@@ -99,8 +99,13 @@ export const djangoBackend: Backend = {
 
     submit: (id) => done(http.post(`/purchase-requests/${id}/submit/`)),
     decide: (id, decision, comment, approvedAmount) =>
-      done(http.post(`/purchase-requests/${id}/decide/`, { decision, comment: comment || null, approved_amount: approvedAmount ?? null })),
+      done(http.post(`/purchase-requests/${id}/decide/`, {
+        decision,
+        comment: comment || null,
+        ...(approvedAmount != null ? { approved_amount: approvedAmount } : {}),
+      })),
     recordPurchase: (id, actualAmount) => done(http.post(`/purchase-requests/${id}/record-purchase/`, { actual_amount: actualAmount })),
+    receive: (id, input: ReceiptInput) => done(http.post(`/purchase-requests/${id}/receive/`, input)),
     complete: (id) => done(http.post(`/purchase-requests/${id}/complete/`)),
   },
 

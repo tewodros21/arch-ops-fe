@@ -75,6 +75,7 @@ export interface ProfilePatch {
   role?: Role
   department?: string | null
   is_active?: boolean
+  assigned_project_ids?: string[]
 }
 
 /** An admin adding a teammate; they sign in with the temporary password and change it on their Account page */
@@ -84,6 +85,7 @@ export interface NewUserInput {
   role: Role
   department: string | null
   password: string
+  assigned_project_ids?: string[]
 }
 
 export interface LaborInput {
@@ -98,7 +100,12 @@ export interface LaborInput {
 
 export type LaborPatch = Partial<Pick<LaborRequest, 'status' | 'assigned_to' | 'management_notes'>>
 
-export type Decision = 'approve' | 'reject' | 'return'
+export type Decision = 'approve' | 'reject'
+
+export interface ReceiptInput {
+  items: { purchase_item_id: string; quantity_received: number }[]
+  note?: string
+}
 
 // ── Read models ──────────────────────────────────────────────────────────────
 
@@ -194,6 +201,7 @@ export interface Backend {
     submit(id: string): Promise<Result>
     decide(id: string, decision: Decision, comment?: string | null, approvedAmount?: number | null): Promise<Result>
     recordPurchase(id: string, actualAmount: number): Promise<Result>
+    receive(id: string, input: ReceiptInput): Promise<Result>
     complete(id: string): Promise<Result>
   }
 

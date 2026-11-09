@@ -6,20 +6,30 @@ import type { ApprovalStage, RequestStatus, Role } from '@/types'
 // transaction. The UI only decides which buttons to show.
 
 const STAGE_AWAITING: Record<ApprovalStage, RequestStatus> = {
+  project_manager: 'awaiting_pm',
   finance: 'awaiting_finance',
-  gm: 'awaiting_gm',
-  owner: 'awaiting_owner',
+  gm: 'awaiting_finance',
+  owner: 'awaiting_finance',
 }
 
 export const ROLE_STAGE: Record<Role, ApprovalStage | null> = {
+  project_manager: 'project_manager',
   finance: 'finance',
-  general_manager: 'gm',
-  owner: 'owner',
   employee: null,
+  ceo: null,
+  site_engineer: null,
+  shopkeeper: null,
+  general_manager: null,
+  owner: null,
   admin: null,
 }
 
-export const STAGE_LABELS: Record<ApprovalStage, string> = { finance: 'Finance', gm: 'General Manager', owner: 'Owner' }
+export const STAGE_LABELS: Record<ApprovalStage, string> = {
+  project_manager: 'Project Manager',
+  finance: 'Finance',
+  gm: 'General Manager (legacy)',
+  owner: 'Owner (legacy)',
+}
 
 /** Statuses a requester can still edit and submit */
 export const EDITABLE_STATUSES: RequestStatus[] = ['draft', 'quote_received']
@@ -31,7 +41,7 @@ async function call(run: Promise<ApiResult>): Promise<Result> {
   return { error: error?.message ?? null }
 }
 
-/** Draft / Quote Received -> Awaiting Finance. Needs at least one quotation. */
+/** Draft / Quote Received -> assigned Project Manager, then Finance. */
 export function submitRequest(requestId: string) {
   return call(backend.purchases.submit(requestId))
 }
@@ -44,13 +54,12 @@ export function rejectRequest(requestId: string, reason: string) {
   return call(backend.purchases.decide(requestId, 'reject', reason))
 }
 
-/** Sends the request back to the requester for changes; the approval chain restarts on resubmit */
-export function returnToRequester(requestId: string, note: string) {
-  return call(backend.purchases.decide(requestId, 'return', note))
-}
-
 export function recordPurchase(requestId: string, actualAmount: number) {
   return call(backend.purchases.recordPurchase(requestId, actualAmount))
+}
+
+export function recordReceipt(requestId: string, items: { purchase_item_id: string; quantity_received: number }[], note?: string) {
+  return call(backend.purchases.receive(requestId, { items, note }))
 }
 
 export function completeRequest(requestId: string) {
@@ -58,9 +67,8 @@ export function completeRequest(requestId: string) {
 }
 
 export function stageForStatus(status: RequestStatus): ApprovalStage | null {
+  if (status === 'awaiting_pm') return 'project_manager'
   if (status === 'awaiting_finance') return 'finance'
-  if (status === 'awaiting_gm') return 'gm'
-  if (status === 'awaiting_owner') return 'owner'
   return null
 }
 
