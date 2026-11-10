@@ -11,7 +11,7 @@ import { formatCurrency } from '@/utils'
 
 const FILTERS: { key: string; label: string; statuses: RequestStatus[] | null }[] = [
   { key: 'all', label: 'All', statuses: null },
-  { key: 'drafts', label: 'Drafts', statuses: ['draft', 'quote_received'] },
+  { key: 'drafts', label: 'Drafts', statuses: ['draft', 'proforma_received'] },
   { key: 'review', label: 'In review', statuses: ['awaiting_pm', 'awaiting_finance'] },
   { key: 'awaiting_pm', label: 'Project Manager', statuses: ['awaiting_pm'] },
   { key: 'awaiting_finance', label: 'Finance', statuses: ['awaiting_finance'] },
@@ -55,11 +55,10 @@ export function RequestList() {
     return () => window.removeEventListener(PURCHASE_SAVED_EVENT, load)
   }, [])
 
-  // Employees see only their own requests; drafts stay private to their requester (and admins)
+  // Drafts stay private to their requester (and admins)
   const scoped = requests.filter((r) => {
     const mine = r.requester_id === profile?.id
     if (profile?.role === 'shopkeeper') return ['purchased', 'partially_received', 'completed'].includes(r.status)
-    if (profile?.role === 'employee') return mine
     if (EDITABLE_STATUSES.includes(r.status)) return mine || profile?.role === 'admin'
     return true
   })

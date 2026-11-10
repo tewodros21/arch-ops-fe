@@ -7,14 +7,11 @@ import { STATUS_LABELS, type LaborRequest, type Profile, type PurchaseRequest, t
 import { approvedValue, compactMoney, DONE, IN_REVIEW, isOverdue, isStuck, money, PAID, STUCK_HOURS } from './metrics'
 
 const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
-  employee: null,
   ceo: null,
   project_manager: 'awaiting_pm',
   site_engineer: null,
   shopkeeper: null,
   finance: 'awaiting_finance',
-  general_manager: null,
-  owner: null,
   admin: null,
 }
 
@@ -95,7 +92,7 @@ export function KpiCards({
   const approved = scoped.filter((r) => DONE.includes(r.status))
   const approvedTotal = approved.reduce((s, r) => s + approvedValue(r), 0)
 
-  const myLabor = ['employee', 'site_engineer'].includes(profile.role) ? labor.filter((l) => l.requested_by === profile.id) : labor
+  const myLabor = profile.role === 'site_engineer' ? labor.filter((l) => l.requested_by === profile.id) : labor
   const activeLabor = myLabor.filter((l) => !['completed', 'cancelled'].includes(l.status))
   const workers = activeLabor.reduce((s, l) => s + Number(l.workers_required ?? 0), 0)
 

@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
-import { Check, Clock, FileText, PackageCheck, Paperclip, Pencil, Plus, RotateCcw, Send, ShieldCheck, Trash2, Upload, X as XIcon } from 'lucide-react'
+import { Check, Clock, FileText, PackageCheck, Paperclip, Pencil, RotateCcw, Send, ShieldCheck, Trash2, Upload, X as XIcon } from 'lucide-react'
 import { notify } from '@/lib/notify'
 import { useAuth } from '@/context/AuthContext'
 import { Avatar, Breadcrumbs, Button, StatusBadge, useConfirm } from '@/components/ui'
@@ -20,18 +20,13 @@ import {
 } from '@/lib/workflow'
 import { ACCEPT_ATTR, attachFile, formatBytes, openAttachment, validateFile } from '@/lib/storage'
 import {
-  addQuotation,
   deletePurchaseRequest,
-  fetchActiveVendors,
   loadPurchaseRequest,
   PURCHASE_SAVED_EVENT,
-  selectQuotation,
   type PurchaseUnavailable,
 } from '@/services/requests'
-import { ATTACHMENT_TYPE_LABELS, ROLE_LABELS, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest, type Vendor } from '@/types'
+import { ATTACHMENT_TYPE_LABELS, ROLE_LABELS, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest } from '@/types'
 import { formatCurrency } from '@/utils'
-
-const EMPTY_QUOTE = { vendor_id: '', amount: '', valid_until: '', notes: '' }
 
 export function RequestDetail() {
   const { id } = useParams()
@@ -51,11 +46,6 @@ export function RequestDetail() {
   const [uploadType, setUploadType] = useState<AttachmentType>('other')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
-  const [vendors, setVendors] = useState<Vendor[]>([])
-  const [quoteFormOpen, setQuoteFormOpen] = useState(false)
-  const [quoteForm, setQuoteForm] = useState(EMPTY_QUOTE)
-  const [quoteFile, setQuoteFile] = useState<File | null>(null)
-  const [quoteBusy, setQuoteBusy] = useState(false)
 
   async function load() {
     if (!id) {
@@ -96,7 +86,7 @@ export function RequestDetail() {
       unavailable === 'sent_back'
         ? unavailableMessage || 'The requester can edit and resubmit. It will come back to Finance when they are ready.'
         : unavailable === 'with_requester'
-          ? unavailableMessage || 'Only the requester can open it while it is a draft or waiting on quote changes.'
+          ? unavailableMessage || 'Only the requester can open it while it is a draft or waiting on Proforma changes.'
           : 'This purchase request could not be opened.'
     return (
       <div className="rounded-[1.75rem] bg-white px-6 py-16 text-center">
@@ -119,17 +109,16 @@ export function RequestDetail() {
   // The server blocks self-approval too; hide the panel instead of letting it fail
   const canAct = myTurn && !isRequester
   const editable = isRequester && EDITABLE_STATUSES.includes(req.status)
-  const financeOrAdmin = role === 'finance' || role === 'admin'
   const canPurchase = role === 'finance'
-  // Mirrors the API's quotation rules (POST /purchase-requests/{id}/quotations/)
-  const canAddQuote = (isRequester || financeOrAdmin) && ['draft', 'quote_received'].includes(req.status)
-  const canSelectQuote = financeOrAdmin && ['draft', 'quote_received'].includes(req.status)
   const canSetAmount = role === 'finance' && currentStage === 'finance'
+  const hasProforma = !!(
+    req.vendor_name?.trim() &&
+    req.vendor_location?.trim() &&
+    Number(req.proforma_amount) > 0 &&
+    req.attachments?.some((attachment) => attachment.attachment_type === 'proforma')
+  )
   const requestDate = req.submitted_at ?? req.created_at
 
-  const quotes = [...(req.quotations ?? [])].sort((a, b) => Number(a.amount) - Number(b.amount))
-  const lowest = quotes.length ? Number(quotes[0].amount) : null
-  const selectedQuote = quotes.find((q) => q.is_selected)
   const items = req.items ?? []
   const itemsTotal = items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.estimated_unit_price ?? 0), 0)
   const allItemsReceived = items.length > 0 && items.every((item) => Number(item.received_quantity ?? 0) >= Number(item.quantity))
@@ -142,7 +131,7 @@ export function RequestDetail() {
     ...(req.approvals?.some((approval) => approval.stage === 'gm') ? ['gm' as const] : []),
     ...(req.approvals?.some((approval) => approval.stage === 'owner') ? ['owner' as const] : []),
   ]
-  const defaultApproved = Number(selectedQuote?.amount ?? req.approved_amount ?? req.estimated_amount)
+  const defaultApproved = Number(req.proforma_amount ?? req.approved_amount ?? req.estimated_amount)
   const approvedInput = approvedAmount ?? String(defaultApproved)
   const nextStep = currentStage === 'project_manager' ? 'Finance' : 'purchasing'
 
@@ -195,7 +184,7 @@ export function RequestDetail() {
   async function handleDelete() {
     const ok = await confirm({
       title: 'Delete this draft?',
-      body: `${req.request_number} and its items and quotes will be removed for good.`,
+      body: `${req.request_number} and its items and documents will be removed for good.`,
       confirmLabel: 'Delete draft',
       tone: 'danger',
       icon: Trash2,
@@ -346,50 +335,6 @@ export function RequestDetail() {
   async function handleOpenDocument(a: PurchaseAttachment) {
     const { error } = await openAttachment(a)
     if (error) notify.error(`Could not open this file: ${error}`)
-  }
-
-  function openQuoteForm() {
-    setQuoteFormOpen(true)
-    if (vendors.length === 0) fetchActiveVendors().then(setVendors)
-  }
-
-  async function handleAddQuote() {
-    if (!profile) return
-    if (!quoteForm.vendor_id || !(Number(quoteForm.amount) > 0)) {
-      notify.warning('Choose a vendor and enter the quoted amount')
-      return
-    }
-    setQuoteBusy(true)
-    const { error, fileError } = await addQuotation(req.id, {
-      vendor_id: quoteForm.vendor_id,
-      amount: Number(quoteForm.amount),
-      valid_until: quoteForm.valid_until || null,
-      notes: quoteForm.notes.trim() || null,
-      file: quoteFile,
-    })
-    setQuoteBusy(false)
-    if (error) {
-      notify.error(`Could not add the quotation: ${error}`)
-      return
-    }
-    if (fileError) notify.warning(`Quote saved, but the file upload failed: ${fileError}`)
-    else notify.success('Quotation added to this request')
-    setQuoteForm(EMPTY_QUOTE)
-    setQuoteFile(null)
-    setQuoteFormOpen(false)
-    load()
-  }
-
-  async function handleSelectQuote(quoteId: string) {
-    setBusy(`select-${quoteId}`)
-    const { error } = await selectQuotation(req.id, quoteId)
-    setBusy(null)
-    if (error) notify.error(`Could not select this quote: ${error}`)
-    else {
-      notify.success('Quote marked as the selected vendor')
-      setApprovedAmount(null)
-      load()
-    }
   }
 
   return (
@@ -583,136 +528,34 @@ export function RequestDetail() {
             )}
           </section>
 
-          {!isShopkeeper && <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
-            <SectionTitle
-              title="Vendor quotations"
-              count={quotes.length}
-              action={
-                canAddQuote &&
-                !quoteFormOpen && (
-                  <Button variant="outline" onClick={openQuoteForm} className="h-9 px-4">
-                    <Plus size={15} />
-                    Add quote
-                  </Button>
-                )
-              }
-            />
-            {quotes.length === 0 ? (
-              <p className="text-sm text-slate-500">No quotations attached.</p>
-            ) : (
-              <div className="space-y-2">
-                {quotes.map((q) => {
-                  const diff = lowest !== null ? Number(q.amount) - lowest : 0
-                  const expired = q.valid_until ? new Date(`${q.valid_until}T23:59`) < new Date() : false
-                  return (
-                    <div
-                      key={q.id}
-                      className={clsx(
-                        'flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3.5',
-                        q.is_selected && 'ring-2 ring-[var(--ink)]',
-                      )}
+          <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
+            <SectionTitle title="Vendor & Proforma" />
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <Meta label="Vendor">{req.vendor_name || 'Not provided'}</Meta>
+              <Meta label="Vendor location">{req.vendor_location || 'Not provided'}</Meta>
+              {!isShopkeeper && req.proforma_amount != null && (
+                <Meta label="Proforma amount">{formatCurrency(req.proforma_amount)}</Meta>
+              )}
+            </div>
+            {!isShopkeeper && req.attachments?.some((attachment) => attachment.attachment_type === 'proforma') && (
+              <div className="mt-4 border-t border-black/[0.06] pt-4">
+                {req.attachments
+                  .filter((attachment) => attachment.attachment_type === 'proforma')
+                  .map((attachment) => (
+                    <button
+                      key={attachment.id}
+                      type="button"
+                      onClick={() => handleOpenDocument(attachment)}
+                      className="focus-ring flex items-center gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3 text-left"
                     >
-                      <div className="min-w-0 flex-1">
-                        <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[var(--ink)]">
-                          {q.vendor?.name}
-                          {quotes.length > 1 && diff === 0 && <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 text-[11px]">Lowest</span>}
-                          {q.is_selected && <span className="rounded-full bg-[var(--ink)] px-2 py-0.5 text-[11px] text-white">Selected</span>}
-                        </p>
-                        <p className="truncate text-xs text-slate-500">
-                          {q.valid_until ? (
-                            <span className={clsx(expired && 'font-semibold text-[var(--accent)]')}>
-                              {expired ? 'Expired' : 'Valid until'} {format(new Date(`${q.valid_until}T00:00`), 'MMM d, yyyy')}
-                            </span>
-                          ) : (
-                            'No expiry set'
-                          )}
-                          {q.notes && ` · ${q.notes}`}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-3">
-                        {canSelectQuote && !q.is_selected && (
-                          <Button variant="ghost" onClick={() => handleSelectQuote(q.id)} loading={busy === `select-${q.id}`} className="h-9 px-3 text-xs">
-                            Select
-                          </Button>
-                        )}
-                        <div className="text-right">
-                          <p className="text-lg leading-tight font-bold text-[var(--ink)]">{formatCurrency(q.amount)}</p>
-                          {quotes.length > 1 && diff > 0 && (
-                            <p className="text-[11px] text-slate-500">
-                              +{formatCurrency(diff)} ({Math.round((diff / (lowest || 1)) * 100)}%)
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )
-                })}
+                      <FileText size={17} className="text-[var(--accent)]" />
+                      <span className="truncate text-sm font-medium text-[var(--ink)]">{attachment.file_name}</span>
+                      <span className="shrink-0 text-xs text-slate-500">Open Proforma</span>
+                    </button>
+                  ))}
               </div>
             )}
-
-            {quoteFormOpen && (
-              <div className="mt-4 space-y-2 border-t border-black/[0.06] pt-4">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_10rem]">
-                  <select
-                    value={quoteForm.vendor_id}
-                    onChange={(e) => setQuoteForm((f) => ({ ...f, vendor_id: e.target.value }))}
-                    aria-label="Vendor"
-                    className="field h-11 !py-0"
-                  >
-                    <option value="">{vendors.length ? 'Select vendor' : 'Loading vendors…'}</option>
-                    {vendors.map((v) => (
-                      <option key={v.id} value={v.id}>{v.name}</option>
-                    ))}
-                  </select>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="0.01"
-                    value={quoteForm.amount}
-                    onChange={(e) => setQuoteForm((f) => ({ ...f, amount: e.target.value }))}
-                    placeholder="Amount (ETB)"
-                    aria-label="Quoted amount"
-                    className="field h-11 !py-0"
-                  />
-                </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_10rem]">
-                  <input
-                    value={quoteForm.notes}
-                    onChange={(e) => setQuoteForm((f) => ({ ...f, notes: e.target.value }))}
-                    placeholder="Notes (optional)"
-                    className="field h-11 !py-0"
-                  />
-                  <input
-                    type="date"
-                    value={quoteForm.valid_until}
-                    onChange={(e) => setQuoteForm((f) => ({ ...f, valid_until: e.target.value }))}
-                    aria-label="Valid until"
-                    title="Valid until"
-                    className="field h-11 !py-0"
-                  />
-                </div>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <FilePick file={quoteFile} onFile={pickFile(setQuoteFile)} label="Attach quote file (optional)" />
-                  <div className="flex gap-2">
-                    <Button onClick={handleAddQuote} loading={quoteBusy} className="flex-1 sm:flex-none">
-                      Save quote
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      onClick={() => {
-                        setQuoteFormOpen(false)
-                        setQuoteForm(EMPTY_QUOTE)
-                        setQuoteFile(null)
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </section>}
+          </section>
 
           {!isShopkeeper && <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
             <SectionTitle title="Documents" count={req.attachments?.length ?? 0} />
@@ -764,18 +607,18 @@ export function RequestDetail() {
             <section className="panel-dark relative overflow-hidden rounded-[1.75rem] p-6">
               <div className="relative">
                 <span className="rounded-full bg-[var(--sun)] px-3 py-1 text-xs font-semibold text-[var(--ink)]">
-                  {req.status === 'draft' ? 'Draft' : 'Quote received'}
+                  {req.status === 'draft' ? 'Draft' : 'Proforma received'}
                 </span>
                 <p className="mt-3 text-2xl leading-tight font-black text-white">Ready to submit?</p>
                 <p className="mt-1 text-sm text-white/60">
-                  {quotes.length === 0
-                    ? 'Add at least one vendor quote before submitting for review.'
+                  {!hasProforma
+                    ? 'Complete vendor details and attach the Proforma before submitting for review.'
                     : role === 'project_manager'
                       ? 'Finance reviews this request after you submit it.'
                       : 'Submit this request to the assigned Project Manager. Project Manager requests go directly to Finance.'}
                 </p>
                 <div className="mt-5 flex flex-col gap-2">
-                  <Button variant="accent" onClick={handleSubmit} loading={busy === 'submit'} disabled={quotes.length === 0} className="h-12">
+                  <Button variant="accent" onClick={handleSubmit} loading={busy === 'submit'} disabled={!hasProforma} className="h-12">
                     <Send size={17} />
                     Submit for review
                   </Button>
@@ -802,7 +645,7 @@ export function RequestDetail() {
                 <p className="mt-3 text-2xl leading-tight font-black text-white">Review this request</p>
                 {canSetAmount && (
                   <label className="mt-4 block">
-                    <span className="text-xs text-white/60">Approved amount{selectedQuote ? ' · from the selected quote' : ''}</span>
+                    <span className="text-xs text-white/60">Approved amount · Proforma</span>
                     <span className="mt-1.5 flex items-center gap-1 rounded-2xl bg-white/10 px-4 py-2.5 focus-within:ring-2 focus-within:ring-[var(--sun)]">
                       <span className="text-sm font-bold text-white/50">ETB</span>
                       <input

@@ -12,7 +12,7 @@ const SPEND_SERIES = [
 ] as const
 
 const STATUS_GROUPS: { label: string; statuses: RequestStatus[]; color: string; to: string }[] = [
-  { label: 'New', statuses: ['draft', 'quote_received'], color: COLORS.sand, to: '/requests' },
+  { label: 'New', statuses: ['draft', 'proforma_received'], color: COLORS.sand, to: '/requests' },
   { label: 'In review', statuses: IN_REVIEW, color: COLORS.sun, to: '/requests?status=review' },
   { label: 'Approved', statuses: ['approved'], color: COLORS.accent, to: '/requests?status=approved' },
   { label: 'Purchased & done', statuses: PAID, color: COLORS.ink, to: '/requests?status=done' },

@@ -46,7 +46,7 @@ export function Vendors() {
       <PageHeader
         title="Vendors"
         count={filtered.length}
-        subtitle="Suppliers and contractors you can quote from"
+        subtitle="Legacy vendor directory"
       />
 
       <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">

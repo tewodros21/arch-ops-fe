@@ -4,7 +4,7 @@ import type { Role, Vendor } from '@/types'
 export type { VendorHistory, VendorInput, VendorQuoteRow, VendorRequestSummary } from '@/api'
 
 /** Mirrors the API's vendor permissions */
-export const VENDOR_MANAGER_ROLES: Role[] = ['admin', 'owner', 'finance']
+export const VENDOR_MANAGER_ROLES: Role[] = ['admin', 'finance']
 
 export async function fetchVendors(): Promise<Vendor[]> {
   const { data, error } = await backend.vendors.list()
@@ -24,7 +24,7 @@ export async function saveVendor(input: VendorInput, id?: string): Promise<{ dat
   return { data, error: error?.message ?? null }
 }
 
-/** Quotation history for a vendor, with the rival quotes on each request and the quotation files of requests it won */
+/** Legacy Proforma history for a vendor, including historical competing prices and files. */
 export async function fetchVendorHistory(vendorId: string): Promise<VendorHistory> {
   const { data, error } = await backend.vendors.history(vendorId)
   if (error) console.error(`Error fetching quotations for vendor ${vendorId}:`, error)

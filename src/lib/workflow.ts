@@ -15,12 +15,9 @@ const STAGE_AWAITING: Record<ApprovalStage, RequestStatus> = {
 export const ROLE_STAGE: Record<Role, ApprovalStage | null> = {
   project_manager: 'project_manager',
   finance: 'finance',
-  employee: null,
   ceo: null,
   site_engineer: null,
   shopkeeper: null,
-  general_manager: null,
-  owner: null,
   admin: null,
 }
 
@@ -32,7 +29,7 @@ export const STAGE_LABELS: Record<ApprovalStage, string> = {
 }
 
 /** Statuses a requester can still edit and submit */
-export const EDITABLE_STATUSES: RequestStatus[] = ['draft', 'quote_received']
+export const EDITABLE_STATUSES: RequestStatus[] = ['draft', 'proforma_received']
 
 type Result = { error: string | null }
 
@@ -41,7 +38,7 @@ async function call(run: Promise<ApiResult>): Promise<Result> {
   return { error: error?.message ?? null }
 }
 
-/** Draft / Quote Received -> assigned Project Manager, then Finance. */
+/** Draft / Proforma Received -> assigned Project Manager, then Finance. */
 export function submitRequest(requestId: string) {
   return call(backend.purchases.submit(requestId))
 }

@@ -1,8 +1,5 @@
 export type Role =
-  | 'employee'
   | 'finance'
-  | 'general_manager'
-  | 'owner'
   | 'admin'
   | 'ceo'
   | 'project_manager'
@@ -11,7 +8,7 @@ export type Role =
 
 export type RequestStatus =
   | 'draft'
-  | 'quote_received'
+  | 'proforma_received'
   | 'awaiting_pm'
   | 'awaiting_finance'
   | 'approved'
@@ -102,7 +99,7 @@ export interface Approval {
   decided_at: string | null
 }
 
-export type AttachmentType = 'quotation' | 'invoice' | 'receipt' | 'delivery' | 'photo' | 'other'
+export type AttachmentType = 'proforma' | 'invoice' | 'receipt' | 'delivery' | 'photo' | 'other'
 
 export interface PurchaseAttachment {
   id: string
@@ -126,6 +123,9 @@ export interface PurchaseRequest {
   project_id: string
   project?: Project
   department?: string
+  vendor_name?: string
+  vendor_location?: string
+  proforma_amount?: number | null
   requester_id?: string
   requester?: Profile
   required_date?: string | null

@@ -75,7 +75,7 @@ export async function createPurchaseRequest(input: RequestInput): Promise<{ id: 
   return { id: data?.id ?? null, error: error?.message ?? null }
 }
 
-/** Only the requester's own draft / quote_received requests can be edited; status is never touched here */
+/** Only the requester's own draft / proforma_received requests can be edited; status is never touched here */
 export async function updatePurchaseRequest(id: string, input: RequestInput): Promise<Result> {
   const { error } = await backend.purchases.update(id, input)
   return { error: error?.message ?? null }
@@ -86,13 +86,13 @@ export async function replaceItems(requestId: string, items: ItemInput[]): Promi
   return { error: error?.message ?? null }
 }
 
-/** Adding a quote to a draft moves it to Quote Received (server side) */
+/** Legacy vendor-quotation helper retained for historical vendor records. */
 export async function addQuotation(requestId: string, quote: QuoteInput): Promise<Result & { fileError?: string | null }> {
   const { file, ...fields } = quote
   const { error } = await backend.purchases.addQuotation(requestId, fields)
   if (error) return { error: error.message }
   if (file) {
-    const { error: fileError } = await attachFile(requestId, file, 'quotation', 'Quotation from vendor')
+    const { error: fileError } = await attachFile(requestId, file, 'proforma', 'Vendor Proforma')
     return { error: null, fileError }
   }
   return { error: null }

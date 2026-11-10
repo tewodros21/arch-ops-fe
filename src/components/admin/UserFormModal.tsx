@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Copy, RefreshCw, UserPlus } from 'lucide-react'
 import { notify } from '@/lib/notify'
-import { createUser, fetchDepartments, fetchProjects } from '@/services'
-import { ROLE_LABELS, type Department, type Profile, type Project, type Role } from '@/types'
+import { createUser, fetchProjects } from '@/services'
+import { ROLE_LABELS, type Profile, type Project, type Role } from '@/types'
 import { Field, FormModal } from './FormModal'
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
@@ -20,17 +20,14 @@ function generatePassword(length = 12) {
 export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSaved: (person: Profile) => void }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<Role>('employee')
-  const [department, setDepartment] = useState('')
+  const [role, setRole] = useState<Role>('site_engineer')
   const [assignedProjectIds, setAssignedProjectIds] = useState<string[]>([])
   const [password, setPassword] = useState(generatePassword)
-  const [departments, setDepartments] = useState<Department[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [touched, setTouched] = useState(false)
 
   useEffect(() => {
-    Promise.all([fetchDepartments(), fetchProjects(false)]).then(([departmentList, projectResult]) => {
-      setDepartments(departmentList)
+    fetchProjects(false).then((projectResult) => {
       if (projectResult.error) notify.error('Could not load projects for Project Manager assignment')
       setProjects(projectResult.data ?? [])
     })
@@ -62,7 +59,6 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
       email: email.trim().toLowerCase(),
       full_name: name.trim(),
       role,
-      department: department || null,
       password,
       assigned_project_ids: role === 'project_manager' ? assignedProjectIds : [],
     })
@@ -100,23 +96,13 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
           className={fieldClass(errors.email)}
         />
       </Field>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Role" htmlFor="u-role">
-          <select id="u-role" value={role} onChange={(e) => setRole(e.target.value as Role)} className="field">
-            {ROLES.map((r) => (
-              <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Department" htmlFor="u-dept" hint="Optional">
-          <select id="u-dept" value={department} onChange={(e) => setDepartment(e.target.value)} className="field">
-            <option value="">No department</option>
-            {departments.map((d) => (
-              <option key={d.id} value={d.name}>{d.name}</option>
-            ))}
-          </select>
-        </Field>
-      </div>
+      <Field label="Role" htmlFor="u-role">
+        <select id="u-role" value={role} onChange={(e) => setRole(e.target.value as Role)} className="field">
+          {ROLES.map((r) => (
+            <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+          ))}
+        </select>
+      </Field>
       <ProjectAssignmentField
         enabled={role === 'project_manager'}
         projects={projects}

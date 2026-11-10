@@ -185,11 +185,7 @@ function RolePill({ role }: { role: Role }) {
   const tone =
     role === 'admin'
       ? 'bg-[var(--ink)] text-white'
-      : role === 'owner'
-        ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-        : role === 'employee'
-          ? 'bg-[var(--canvas)] text-[var(--ink-soft)]'
-          : 'bg-[var(--sun-soft)] text-[var(--ink)]'
+      : 'bg-[var(--sun-soft)] text-[var(--ink)]'
   return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold whitespace-nowrap ${tone}`}>{ROLE_LABELS[role]}</span>
 }
 

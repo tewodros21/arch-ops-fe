@@ -24,19 +24,16 @@ import {
 } from '@/types'
 
 const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
-  employee: null,
   ceo: null,
   project_manager: 'awaiting_pm',
   site_engineer: null,
   shopkeeper: null,
   finance: 'awaiting_finance',
-  general_manager: null,
-  owner: null,
   admin: null,
 }
 
 const PIPELINE: { title: string; statuses: RequestStatus[] }[] = [
-  { title: 'New', statuses: ['draft', 'quote_received'] },
+  { title: 'New', statuses: ['draft', 'proforma_received'] },
   { title: 'In review', statuses: IN_REVIEW },
   { title: 'Approved', statuses: ['approved'] },
   { title: 'Delivery & completed', statuses: ['purchased', 'partially_received', 'completed'] },
@@ -45,7 +42,7 @@ const PIPELINE: { title: string; statuses: RequestStatus[] }[] = [
 // How far along the approval chain a request is, for the progress bars
 const PROGRESS: Record<RequestStatus, number> = {
   draft: 8,
-  quote_received: 20,
+  proforma_received: 20,
   awaiting_pm: 38,
   awaiting_finance: 40,
   approved: 100,
@@ -111,7 +108,7 @@ export function Dashboard() {
 
   if (!profile) return null
 
-  const scoped = profile.role === 'employee' ? requests.filter((r) => r.requester_id === profile.id) : requests
+  const scoped = requests
   const awaitingStatus = AWAITING_BY_ROLE[profile.role]
   const priority = (awaitingStatus ? requests.filter((r) => r.status === awaitingStatus) : scoped.filter((r) => !DONE.includes(r.status) && r.status !== 'rejected'))
     .slice()

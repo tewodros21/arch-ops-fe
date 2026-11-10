@@ -7,7 +7,7 @@ import { SiteHeader } from '@/components/layout/SiteHeader'
 import { AssetSlot } from '@/components/ui'
 import { ROLE_LABELS, type Role } from '@/types'
 
-const WORKFLOW = ['Request', 'Quote', 'Project Manager', 'Finance', 'Purchase', 'Partial receipt', 'Complete']
+const WORKFLOW = ['Request', 'Proforma', 'Project Manager', 'Finance', 'Purchase', 'Partial receipt', 'Complete']
 
 const STAGES = [
   { n: '01', title: 'Project Manager', body: 'Reviews requests for assigned projects. A Project Manager’s own requests go straight to Finance.' },
@@ -17,16 +17,16 @@ const STAGES = [
 
 // Role cards: drop cut-out PNGs (transparent background) into public/assets/roles/
 const ROLES: { role: Role; blurb: string; bg: string; fg: string }[] = [
-  { role: 'site_engineer', blurb: 'Creates project purchase requests with items, quantities, estimates and vendor quotes.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
+  { role: 'site_engineer', blurb: 'Creates project purchase requests with items, quantities, estimates and a vendor Proforma.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
   { role: 'project_manager', blurb: 'Reviews requests for assigned projects before they go to Finance.', bg: 'var(--sun)', fg: 'var(--ink)' },
   { role: 'finance', blurb: 'Reviews pricing, approves the spend and records the purchase.', bg: 'var(--accent)', fg: '#ffffff' },
   { role: 'shopkeeper', blurb: 'Tracks item deliveries and records full or partial quantities received.', bg: 'var(--panel-dark)', fg: '#ffffff' },
   { role: 'ceo', blurb: 'Creates requests and gets visibility across project purchasing.', bg: '#d9e8e4', fg: 'var(--ink)' },
-  { role: 'admin', blurb: 'Runs users, projects, vendors and the rules the workflow follows.', bg: '#e6e1da', fg: 'var(--ink)' },
+  { role: 'admin', blurb: 'Runs users, projects and the rules the workflow follows.', bg: '#e6e1da', fg: 'var(--ink)' },
 ]
 
 const BEFORE = ['Phone calls for every request', 'Screenshots as the only record', 'No idea what is pending or late', 'Manual follow-ups on every purchase']
-const AFTER = ['Project Manager → Finance approvals', 'Quotes and purchase records attached', 'Partial deliveries tracked by item quantity', 'Audit trail nobody can edit']
+const AFTER = ['Project Manager → Finance approvals', 'Proforma and purchase documents attached', 'Partial deliveries tracked by item quantity', 'Audit trail nobody can edit']
 
 export function Home() {
   const { profile } = useAuth()
@@ -139,7 +139,7 @@ export function Home() {
             <div className="flex flex-col justify-between rounded-[2rem] bg-[#e6e1da] p-7">
               <div className="flex items-start justify-between gap-4">
                 <p className="text-xl leading-snug font-medium text-[var(--ink)]">
-                  No more phone calls, screenshots or lost quotes to get a purchase approved.
+                  No more phone calls, screenshots or lost Proforma documents to get a purchase approved.
                 </p>
                 <Quote size={28} className="shrink-0 fill-[var(--ink)] text-[var(--ink)]" />
               </div>

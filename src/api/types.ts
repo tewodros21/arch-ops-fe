@@ -44,7 +44,9 @@ export interface RequestInput {
   title: string
   description: string
   project_id: string
-  department: string
+  vendor_name: string
+  vendor_location: string
+  proforma_amount: number | null
   estimated_amount: number
   justification: string
   required_date: string | null
@@ -83,7 +85,6 @@ export interface NewUserInput {
   email: string
   full_name: string
   role: Role
-  department: string | null
   password: string
   assigned_project_ids?: string[]
 }

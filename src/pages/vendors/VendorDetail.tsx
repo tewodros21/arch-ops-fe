@@ -13,10 +13,10 @@ import type { Vendor } from '@/types'
 
 const money = (n: number) => formatCurrency(Math.round(n))
 
-// How this quote compared with the others on the same request
+// How this historical Proforma compared with the other submissions on the same request
 function priceHint(q: VendorQuoteRow): { label: string; tone: 'sun' | 'muted' | 'plain' } {
   const amount = Number(q.amount)
-  if (q.competing.length < 2) return { label: 'Only quote', tone: 'plain' }
+  if (q.competing.length < 2) return { label: 'Only Proforma', tone: 'plain' }
   const lowest = Math.min(...q.competing)
   if (amount <= lowest) return { label: `Lowest of ${q.competing.length}`, tone: 'sun' }
   const pct = Math.round(((amount - lowest) / lowest) * 100)
@@ -116,10 +116,10 @@ export function VendorDetail() {
 
       {/* ── Stats ── */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Quotes given" value={String(quotes.length)} />
+        <Stat label="Proformas submitted" value={String(quotes.length)} />
         <Stat label="Times selected" value={String(won.length)} hint={quotes.length ? `${Math.round((won.length / quotes.length) * 100)}% win rate` : undefined} />
         <Stat label="Total purchased" value={money(purchasedTotal)} hint={`${purchases.length} purchase${purchases.length === 1 ? '' : 's'}`} highlight />
-        <Stat label="Average quote" value={quotes.length ? money(avgQuote) : '—'} />
+        <Stat label="Average Proforma" value={quotes.length ? money(avgQuote) : '—'} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -127,7 +127,7 @@ export function VendorDetail() {
         <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
           <SectionTitle title="Pricing history" count={quotes.length} />
           {quotes.length === 0 ? (
-            <p className="text-sm text-slate-500">This vendor has not quoted on any request yet.</p>
+            <p className="text-sm text-slate-500">This vendor has no historical Proforma records.</p>
           ) : (
             <ul className="space-y-2">
               {quotes.map((q) => {
@@ -147,7 +147,7 @@ export function VendorDetail() {
                         <p className="mt-1.5 truncate text-sm font-semibold text-[var(--ink)]">{q.request?.title}</p>
                         <p className="text-xs text-slate-500">
                           {q.request?.project?.name ? `${q.request.project.name} · ` : ''}
-                          Quoted {format(new Date(q.created_at), 'MMM d, yyyy')}
+                          Proforma submitted {format(new Date(q.created_at), 'MMM d, yyyy')}
                           {q.valid_until ? ` · valid until ${format(new Date(`${q.valid_until}T00:00`), 'MMM d')}` : ''}
                         </p>
                       </div>
@@ -212,9 +212,9 @@ export function VendorDetail() {
 
           {/* ── Documents ── */}
           <section className="rounded-[1.75rem] bg-white p-6">
-            <SectionTitle title="Quotation files" count={documents.length} />
+            <SectionTitle title="Proforma files" count={documents.length} />
             {documents.length === 0 ? (
-              <p className="text-sm text-slate-500">No quotation files on requests this vendor won.</p>
+              <p className="text-sm text-slate-500">No Proforma files on requests this vendor won.</p>
             ) : (
               <ul className="space-y-2">
                 {documents.map((d) => (

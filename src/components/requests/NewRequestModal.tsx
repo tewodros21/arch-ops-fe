@@ -4,25 +4,21 @@ import clsx from 'clsx'
 import { format } from 'date-fns'
 import { ArrowRight, Building2, CalendarDays, FileText, Info, Package, Pencil, Plus, ReceiptText, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { notify } from '@/lib/notify'
-import { ACCEPT_ATTR, formatBytes, validateFile } from '@/lib/storage'
+import { ACCEPT_ATTR, attachFile, formatBytes, validateFile } from '@/lib/storage'
 import { EDITABLE_STATUSES, submitRequest } from '@/lib/workflow'
 import { useAuth } from '@/context/AuthContext'
 import { formatCurrency } from '@/utils'
 import { ReviewTile, StepField as Field, StepModal, type Step } from '@/components/ui/StepModal'
 import {
-  addQuotation,
   announcePurchaseSaved,
   createPurchaseRequest,
-  deleteQuotations,
-  fetchActiveVendors,
-  fetchDepartments,
   fetchProjects,
   fetchPurchaseRequestById,
   replaceItems,
   updatePurchaseRequest,
   type RequestInput,
 } from '@/services/requests'
-import type { Department, Project, Vendor, VendorQuotation } from '@/types'
+import type { Project } from '@/types'
 
 interface ItemRow {
   name: string
@@ -32,16 +28,7 @@ interface ItemRow {
   description: string
 }
 
-interface QuotationRow {
-  vendor_id: string
-  amount: string
-  valid_until: string
-  notes: string
-  file: File | null
-}
-
 const EMPTY_ITEM: ItemRow = { name: '', quantity: '1', unit: 'unit', unit_price: '', description: '' }
-const EMPTY_QUOTATION: QuotationRow = { vendor_id: '', amount: '', valid_until: '', notes: '', file: null }
 const UNITS = [
   'unit', 'each', 'pcs', 'pair', 'pack', 'set', 'box', 'bag', 'sack', 'bucket', 'drum',
   'm', 'cm', 'mm', 'm²', 'm³', 'ft', 'roll', 'sheet', 'board', 'length', 'bundle', 'pallet', 'load',
@@ -53,7 +40,7 @@ const STEPS: Step[] = [
   { title: 'Details', hint: 'What you need and for which project' },
   { title: 'Items', hint: 'Line items and quantities' },
   { title: 'Cost & timing', hint: 'Estimate, due date and why' },
-  { title: 'Quotations', hint: 'Vendor quotes, needed to submit' },
+  { title: 'Vendor & Proforma', hint: 'Vendor details and optional Proforma document' },
   { title: 'Review', hint: 'Save a draft or submit' },
 ]
 
@@ -65,9 +52,7 @@ function money(value: string | number) {
   return Number.isFinite(n) && n > 0 ? formatCurrency(n) : '—'
 }
 
-// A row counts once any field differs from the blank template
 const itemStarted = (r: ItemRow) => !!(r.name.trim() || r.unit_price || r.description.trim())
-const quoteStarted = (q: QuotationRow) => !!(q.vendor_id || q.amount || q.notes || q.valid_until || q.file)
 const lineTotal = (r: ItemRow) => (Number(r.quantity) || 0) * (Number(r.unit_price) || 0)
 
 /** Create a purchase request, or edit a draft when `editId` is given */
@@ -83,19 +68,18 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const [projectLoadFailed, setProjectLoadFailed] = useState(false)
   const [touched, setTouched] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
-  const [vendors, setVendors] = useState<Vendor[]>([])
-  const [departments, setDepartments] = useState<Department[]>([])
   const [items, setItems] = useState<ItemRow[]>([{ ...EMPTY_ITEM }])
-  const [quotations, setQuotations] = useState<QuotationRow[]>([{ ...EMPTY_QUOTATION }])
-  const [existingQuotes, setExistingQuotes] = useState<VendorQuotation[]>([])
-  const [removedQuoteIds, setRemovedQuoteIds] = useState<string[]>([])
+  const [proformaFile, setProformaFile] = useState<File | null>(null)
+  const [existingProforma, setExistingProforma] = useState<string | null>(null)
   // Until the user types an amount, the estimate follows the items total
   const [amountOverridden, setAmountOverridden] = useState(false)
   const [form, setForm] = useState({
     title: '',
     description: '',
     project_id: '',
-    department: profile?.department ?? '',
+    vendor_name: '',
+    vendor_location: '',
+    proforma_amount: '',
     estimated_amount: '',
     justification: '',
     required_date: '',
@@ -122,8 +106,6 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     void fetchProjects().then((result) => {
       if (active) applyProjectsResult(result)
     })
-    fetchActiveVendors().then(setVendors)
-    fetchDepartments().then(setDepartments)
     return () => {
       active = false
     }
@@ -144,7 +126,9 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         title: r.title,
         description: r.description ?? '',
         project_id: r.project_id,
-        department: r.department ?? '',
+        vendor_name: r.vendor_name ?? r.quotations?.[0]?.vendor?.name ?? '',
+        vendor_location: r.vendor_location ?? r.quotations?.[0]?.vendor?.address ?? '',
+        proforma_amount: String(r.proforma_amount ?? r.quotations?.[0]?.amount ?? ''),
         estimated_amount: String(r.estimated_amount ?? ''),
         justification: r.justification ?? '',
         required_date: r.required_date ?? '',
@@ -161,8 +145,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
           : [{ ...EMPTY_ITEM }],
       )
       setAmountOverridden(Math.abs(savedTotal - Number(r.estimated_amount)) > 0.005)
-      setExistingQuotes(r.quotations ?? [])
-      setQuotations([])
+      setExistingProforma(r.attachments?.find((a) => a.attachment_type === 'proforma')?.file_name ?? null)
       setLoadingEdit(false)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -178,23 +161,17 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     setItems((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
 
-  function updateQuotation(index: number, patch: Partial<QuotationRow>) {
-    setTouched(true)
-    setQuotations((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
-  }
-
   const filledItems = items.filter(itemStarted)
   const itemsTotal = filledItems.reduce((sum, r) => sum + lineTotal(r), 0)
   const followsItems = !amountOverridden && itemsTotal > 0
   const estimate = followsItems ? itemsTotal : Number(form.estimated_amount)
-  const keptQuotes = existingQuotes.filter((q) => !removedQuoteIds.includes(q.id))
-  const newQuotes = quotations.filter(quoteStarted)
-  const quoteCount = keptQuotes.length + newQuotes.length
-  const allQuoteAmounts = [...keptQuotes.map((q) => Number(q.amount)), ...newQuotes.map((q) => Number(q.amount)).filter((n) => n > 0)]
-  const lowestQuote = allQuoteAmounts.length ? Math.min(...allQuoteAmounts) : null
+  const hasVendorDetails = !!(
+    form.vendor_name.trim() &&
+    form.vendor_location.trim() &&
+    Number(form.proforma_amount) > 0
+  )
 
   const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || (r.unit_price !== '' && Number(r.unit_price) < 0))
-  const badQuote = newQuotes.find((q) => !q.vendor_id || !(Number(q.amount) > 0))
   const projectError = loadingProjects
     ? 'Projects are still loading. Please wait a moment.'
     : projectLoadFailed
@@ -207,7 +184,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     0: !form.title.trim() ? 'Add a short title for this request' : !form.project_id ? projectError : null,
     1: badItem ? 'Each item needs a name and a quantity' : null,
     2: !(estimate > 0) ? 'Enter an estimated amount to continue' : null,
-    3: badQuote ? 'Each quote needs a vendor and an amount' : null,
+    3: null,
     4: null,
   }
 
@@ -244,8 +221,10 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       notify.warning(stepErrors[firstInvalid]!)
       return
     }
-    if (submitAfter && quoteCount === 0) {
-      notify.warning('Add a vendor quote before submitting')
+    if (submitAfter && !hasVendorDetails) {
+      setShowErrors(true)
+      setStep(3)
+      notify.warning('Enter the vendor name, location, and a Proforma amount greater than zero')
       return
     }
     setBusy(true)
@@ -254,7 +233,9 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       title: form.title.trim(),
       description: form.description.trim(),
       project_id: form.project_id,
-      department: form.department.trim() || 'General',
+      vendor_name: form.vendor_name.trim(),
+      vendor_location: form.vendor_location.trim(),
+      proforma_amount: form.proforma_amount ? Number(form.proforma_amount) : null,
       estimated_amount: estimate,
       justification: form.justification.trim(),
       required_date: form.required_date || null,
@@ -291,27 +272,29 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     )
     if (itemsError) notify.warning(`Line items were not saved: ${itemsError}`)
 
-    const { error: removeError } = await deleteQuotations(removedQuoteIds)
-    if (removeError) notify.warning(`A removed quote could not be deleted: ${removeError}`)
-
-    for (const q of newQuotes) {
-      const { error, fileError } = await addQuotation(requestId, {
-        vendor_id: q.vendor_id,
-        amount: Number(q.amount),
-        valid_until: q.valid_until || null,
-        notes: q.notes.trim() || null,
-        file: q.file,
-      })
-      if (error) notify.warning(`A vendor quotation was not saved: ${error}`)
-      else if (fileError) notify.warning(`Quote file could not be uploaded: ${fileError}`)
+    if (proformaFile) {
+      const { error } = await attachFile(requestId, proformaFile, 'proforma', 'Vendor Proforma')
+      if (error) {
+        setBusy(false)
+        notify.error(`Request saved, but the Proforma could not be uploaded: ${error}`)
+        return
+      }
+      setExistingProforma(proformaFile.name)
+      setProformaFile(null)
     }
 
     if (submitAfter) {
       const { error } = await submitRequest(requestId)
-      if (error) notify.error(`Saved as draft, not submitted: ${error}`)
+      if (error) {
+        setBusy(false)
+        notify.error(`Saved as draft, not submitted: ${error}`)
+        announcePurchaseSaved(requestId)
+        navigate(`/requests/${requestId}`)
+        return
+      }
       else notify.success('Request submitted for Finance review')
     } else {
-      notify.success(editing ? 'Draft changes saved' : 'Draft saved, submit when quotes are ready')
+      notify.success(editing ? 'Draft changes saved' : 'Draft saved, complete the vendor details before submitting')
     }
 
     setBusy(false)
@@ -321,9 +304,6 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
 
   const project = projects.find((p) => p.id === form.project_id)
   const err = (s: number, when: boolean) => showErrors && step === s && when
-  // Keep an unlisted saved department selectable
-  const departmentNames = departments.map((d) => d.name)
-  if (form.department && departmentNames.length && !departmentNames.includes(form.department)) departmentNames.unshift(form.department)
 
   return (
     <StepModal
@@ -336,7 +316,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       onGoTo={goTo}
       onSubmit={() => save(true)}
       submitLabel="Submit for Finance review"
-      submitDisabled={quoteCount === 0}
+      submitDisabled={!hasVendorDetails}
       secondaryAction={{ label: editing ? 'Save changes' : 'Save as draft', onClick: () => save(false) }}
       discardPrompt={editing ? 'Discard your changes?' : 'Discard this request?'}
       busy={busy}
@@ -353,11 +333,15 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             <span className="text-xl font-bold text-white">{money(estimate)}</span>
           </div>
           <div className="flex items-center gap-1.5 border-t border-white/10 pt-3 text-[11px] text-white/55">
-            <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 font-semibold text-[var(--ink)]">Finance</span>
-            <ArrowRight size={12} />
-            <span>GM</span>
-            <ArrowRight size={12} />
-            <span>Owner</span>
+            {profile?.role === 'project_manager' ? (
+              <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 font-semibold text-[var(--ink)]">Finance</span>
+            ) : (
+              <>
+                <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 font-semibold text-[var(--ink)]">Project Manager</span>
+                <ArrowRight size={12} />
+                <span>Finance</span>
+              </>
+            )}
           </div>
         </>
       }
@@ -431,7 +415,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </div>
           </Field>
 
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-[1fr_14rem]">
+          <div className="grid grid-cols-1 gap-5">
             <Field label="Description" optional>
               <textarea
                 value={form.description}
@@ -440,23 +424,6 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 placeholder="What is this purchase for?"
                 className={clsx(inputClass, 'resize-none border-transparent')}
               />
-            </Field>
-            <Field label="Department" optional>
-              {departmentNames.length > 0 ? (
-                <select value={form.department} onChange={(e) => update('department', e.target.value)} className={clsx(inputClass, 'border-transparent')}>
-                  <option value="">General</option>
-                  {departmentNames.map((name) => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  value={form.department}
-                  onChange={(e) => update('department', e.target.value)}
-                  placeholder="General"
-                  className={clsx(inputClass, 'border-transparent')}
-                />
-              )}
             </Field>
           </div>
         </>
@@ -638,118 +605,47 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       {!loadingEdit && step === 3 && (
         <>
           <p className="text-sm text-[var(--ink-soft)]">
-            At least one vendor quote is needed to submit. You can save a draft now and add quotes later.
+            Enter the supplier details and Proforma amount. Attaching the Proforma document is optional.
           </p>
-
-          {keptQuotes.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Saved quotes</p>
-              {keptQuotes.map((q) => (
-                <div key={q.id} className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-2 truncate text-sm font-semibold text-[var(--ink)]">
-                      {q.vendor?.name ?? 'Vendor'}
-                      {lowestQuote !== null && allQuoteAmounts.length > 1 && Number(q.amount) === lowestQuote && (
-                        <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 text-[11px]">Lowest</span>
-                      )}
-                    </p>
-                    <p className="truncate text-xs text-slate-500">
-                      {q.valid_until ? `Valid until ${format(new Date(`${q.valid_until}T00:00`), 'MMM d, yyyy')}` : 'No expiry set'}
-                      {q.notes ? ` · ${q.notes}` : ''}
-                    </p>
-                  </div>
-                  <span className="flex shrink-0 items-center gap-1">
-                    <span className="text-base font-bold text-[var(--ink)]">{money(q.amount)}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTouched(true)
-                        setRemovedQuoteIds((ids) => [...ids, q.id])
-                      }}
-                      aria-label={`Remove quote from ${q.vendor?.name ?? 'vendor'}`}
-                      className="focus-ring rounded-full p-1.5 text-slate-400 transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          <div className="space-y-3">
-            {quotations.map((q, i) => {
-              const isLowest = lowestQuote !== null && allQuoteAmounts.length > 1 && Number(q.amount) === lowestQuote
-              const invalid = showErrors && step === 3 && quoteStarted(q) && (!q.vendor_id || !(Number(q.amount) > 0))
-              return (
-                <div key={i} className={clsx('rounded-[1.5rem] border p-4', invalid ? 'border-[var(--accent)]' : 'border-black/10')}>
-                  <div className="mb-3 flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-sm font-semibold text-[var(--ink)]">
-                      New quote {keptQuotes.length + i + 1}
-                      {isLowest && <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 text-[11px] font-semibold">Lowest</span>}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setQuotations((rows) => rows.filter((_, idx) => idx !== i))}
-                      aria-label={`Remove quote ${i + 1}`}
-                      className="focus-ring rounded-full p-1.5 text-slate-400 transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_11rem]">
-                    <select
-                      value={q.vendor_id}
-                      onChange={(e) => updateQuotation(i, { vendor_id: e.target.value })}
-                      aria-label="Vendor"
-                      className={clsx(inputClass, 'border-transparent')}
-                    >
-                      <option value="">Select vendor</option>
-                      {vendors.map((v) => (
-                        <option key={v.id} value={v.id}>{v.name}</option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      placeholder="Amount (ETB)"
-                      aria-label="Quoted amount"
-                      value={q.amount}
-                      onChange={(e) => updateQuotation(i, { amount: e.target.value })}
-                      className={clsx(inputClass, 'border-transparent')}
-                    />
-                  </div>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_11rem]">
-                    <input
-                      placeholder="Notes (optional)"
-                      value={q.notes}
-                      onChange={(e) => updateQuotation(i, { notes: e.target.value })}
-                      className={clsx(inputClass, 'border-transparent')}
-                    />
-                    <input
-                      type="date"
-                      aria-label="Valid until"
-                      title="Valid until"
-                      value={q.valid_until}
-                      min={format(new Date(), 'yyyy-MM-dd')}
-                      onChange={(e) => updateQuotation(i, { valid_until: e.target.value })}
-                      className={clsx(inputClass, 'border-transparent', !q.valid_until && 'text-slate-400')}
-                    />
-                  </div>
-                  <DropZone file={q.file} onFile={(file) => updateQuotation(i, { file })} />
-                </div>
-              )
-            })}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Vendor name">
+              <input
+                value={form.vendor_name}
+                onChange={(e) => update('vendor_name', e.target.value)}
+                placeholder="Supplier or company name"
+                className={clsx(inputClass, 'border-transparent')}
+              />
+            </Field>
+            <Field label="Vendor location">
+              <input
+                value={form.vendor_location}
+                onChange={(e) => update('vendor_location', e.target.value)}
+                placeholder="City, site, or address"
+                className={clsx(inputClass, 'border-transparent')}
+              />
+            </Field>
           </div>
-          <button
-            type="button"
-            onClick={() => setQuotations((rows) => [...rows, { ...EMPTY_QUOTATION }])}
-            className="focus-ring flex w-full items-center justify-center gap-2 rounded-[1.5rem] border-2 border-dashed border-black/10 py-4 text-sm font-medium text-[var(--ink)] transition-colors hover:border-black/30"
-          >
-            <Plus size={16} />
-            {quotations.length || keptQuotes.length ? 'Add another quote' : 'Add a quote'}
-          </button>
+          <Field label="Proforma amount (ETB)">
+            <input
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="0.01"
+              value={form.proforma_amount}
+              onChange={(e) => update('proforma_amount', e.target.value)}
+              placeholder="Amount shown on the Proforma"
+              className={clsx(inputClass, 'border-transparent')}
+            />
+          </Field>
+          {existingProforma && !proformaFile && (
+            <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+              Attached Proforma: <span className="font-semibold text-[var(--ink)]">{existingProforma}</span>
+            </p>
+          )}
+          <DropZone file={proformaFile} onFile={(file) => {
+            setTouched(true)
+            setProformaFile(file)
+          }} />
         </>
       )}
 
@@ -767,7 +663,6 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <ReviewTile label="Department" value={form.department || 'General'} onEdit={() => setStep(0)} />
             <ReviewTile
               label="Items"
               value={filledItems.length ? `${filledItems.length} · ${money(itemsTotal)}` : 'None listed'}
@@ -779,8 +674,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               onEdit={() => setStep(2)}
             />
             <ReviewTile
-              label="Quotations"
-              value={quoteCount ? `${quoteCount} · lowest ${money(lowestQuote ?? 0)}` : 'None yet'}
+              label="Vendor / Proforma"
+              value={hasVendorDetails ? `${form.vendor_name} · ${money(form.proforma_amount)}` : 'Incomplete'}
               onEdit={() => setStep(3)}
             />
           </div>
@@ -811,15 +706,15 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </div>
           )}
 
-          {quoteCount === 0 ? (
+          {!hasVendorDetails ? (
             <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--accent-soft)] p-4 text-sm text-[var(--ink)]">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[var(--accent)]">
                 <Info size={16} />
               </span>
               <span>
-                Finance needs at least one vendor quote.{' '}
+                Add the vendor name, location, and Proforma amount to submit. The document is optional.{' '}
                 <button type="button" onClick={() => setStep(3)} className="font-semibold underline underline-offset-2">
-                  Add a quote
+                  Complete vendor details
                 </button>{' '}
                 or save this as a draft for now.
               </span>
@@ -829,9 +724,12 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--sun)]">
                 <ArrowRight size={16} />
               </span>
-              {profile?.role === 'project_manager'
-                ? 'Submitting sends this request directly to Finance for review.'
-                : 'Submitting sends this request to the assigned Project Manager, then Finance.'}
+              <span>
+                {profile?.role === 'project_manager'
+                  ? 'Submitting sends this request directly to Finance for review.'
+                  : 'Submitting sends this request to the assigned Project Manager, then Finance.'}
+                {!proformaFile && !existingProforma && ' You can submit without the Proforma document.'}
+              </span>
             </div>
           )}
         </>
@@ -890,7 +788,7 @@ function DropZone({ file, onFile }: { file: File | null; onFile: (file: File | n
     >
       <Upload size={16} className="shrink-0" />
       <span>
-        Drop the quote file or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
+        Add Proforma document (optional) or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
       </span>
       <input
         type="file"

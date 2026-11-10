@@ -11,8 +11,8 @@ type Tab = 'users' | 'projects' | 'departments'
 
 const TABS: { id: Tab; label: string; icon: typeof Users; roles: Role[]; subtitle: string }[] = [
   { id: 'users', label: 'Users', icon: Users, roles: ['admin'], subtitle: 'Roles and departments decide who approves what' },
-  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin', 'owner'], subtitle: 'Sites requests are raised against, with spend against budget' },
-  { id: 'departments', label: 'Departments', icon: Building2, roles: ['admin', 'owner'], subtitle: 'Teams people and requests belong to' },
+  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin'], subtitle: 'Sites requests are raised against, with spend against budget' },
+  { id: 'departments', label: 'Departments', icon: Building2, roles: ['admin'], subtitle: 'Teams people and requests belong to' },
 ]
 
 export function Admin() {
