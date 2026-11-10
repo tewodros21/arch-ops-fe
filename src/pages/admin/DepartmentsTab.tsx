@@ -78,7 +78,7 @@ export function DepartmentsTab() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-[var(--ink)]">{d.name}</p>
                   <p className="text-xs text-slate-500 md:hidden">
-                    {d.member_count ?? 0} people · {d.is_active ? 'Active' : 'Archived'}
+                    {d.member_count ?? 0} site employees · {d.is_active ? 'Active' : 'Archived'}
                   </p>
                 </div>
               </div>

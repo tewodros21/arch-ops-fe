@@ -78,7 +78,7 @@ export function UsersTab() {
         <div className="min-w-0 flex-1 text-sm">
           <p className="font-bold text-[var(--ink)]">Adding someone new?</p>
           <p className="mt-0.5 text-[var(--ink-soft)]">
-            Create their account here with a temporary password and share it with them. They change it on their Account page.
+            Create their account here with a temporary password and share it with them. They must change it before using the app.
           </p>
         </div>
         <Link

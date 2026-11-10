@@ -1,6 +1,6 @@
-import type { AppNotification, AuditEvent, Department, LaborRequest, Profile, Project, PurchaseRequest, Vendor } from '@/types'
+import type { AppNotification, AuditEvent, Department, LaborRequest, Profile, Project, PurchaseRequest, SiteEmployee, Vendor } from '@/types'
 import { ensureCsrf, hasSession, http, list, onSessionChange, request, setSession, type Page } from './http'
-import type { Backend, Result, VendorHistory } from './types'
+import type { Backend, ItemReceiptInput, Result, SiteEmployeeInput, SiteEmployeePatch, VendorHistory, VendorInput } from './types'
 
 // Data source for the Django REST API. Cookie session auth; the server enforces roles,
 // the approval workflow, audit and notifications.
@@ -68,6 +68,18 @@ export const djangoBackend: Backend = {
     remove: (id) => http.delete(`/departments/${id}/`),
   },
 
+  siteEmployees: {
+    list: (opts = {}) =>
+      list<SiteEmployee>('/site-employees/', {
+        department: opts.department,
+        is_active: opts.activeOnly === undefined ? undefined : opts.activeOnly,
+        search: opts.search,
+      }),
+    create: (input: SiteEmployeeInput) => http.post<SiteEmployee>('/site-employees/', input),
+    update: (id: string, patch: SiteEmployeePatch) => http.patch<SiteEmployee>(`/site-employees/${id}/`, patch),
+    remove: (id: string) => http.delete(`/site-employees/${id}/`),
+  },
+
   projects: {
     // spent_amount is always part of the payload
     list: (opts = {}) => list<Project>('/projects/', { ordering: 'name', is_active: opts.activeOnly ? true : undefined }),
@@ -78,7 +90,7 @@ export const djangoBackend: Backend = {
   vendors: {
     list: (opts = {}) => list<Vendor>('/vendors/', { ordering: 'name', is_active: opts.activeOnly ? true : undefined }),
     get: (id) => http.get<Vendor>(`/vendors/${id}/`),
-    save: (input, id) => save<Vendor>('/vendors/', input, id),
+    save: (input: VendorInput, id) => save<Vendor>('/vendors/', input, id),
     history: (id) => http.get<VendorHistory>(`/vendors/${id}/history/`),
   },
 
@@ -101,14 +113,12 @@ export const djangoBackend: Backend = {
     replaceItems: (id, items) => done(http.put(`/purchase-requests/${id}/items/`, items)),
     addQuotation: (requestId, quote) => done(http.post(`/purchase-requests/${requestId}/quotations/`, quote)),
     removeQuotation: (quoteId) => http.delete(`/quotations/${quoteId}/`),
-    // The server clears the other quotes on the request
     selectQuotation: (_requestId, quoteId) => done(http.post(`/quotations/${quoteId}/select/`)),
-
     submit: (id) => done(http.post(`/purchase-requests/${id}/submit/`)),
     decide: (id, decision, comment, approvedAmount) =>
       done(http.post(`/purchase-requests/${id}/decide/`, { decision, comment: comment || null, approved_amount: approvedAmount ?? null })),
     recordPurchase: (id, actualAmount) => done(http.post(`/purchase-requests/${id}/record-purchase/`, { actual_amount: actualAmount })),
-    complete: (id) => done(http.post(`/purchase-requests/${id}/complete/`)),
+    updateReceivedItems: (id, items: ItemReceiptInput[]) => done(http.post(`/purchase-requests/${id}/receive/`, { items })),
   },
 
   attachments: {

@@ -7,21 +7,22 @@ import { SiteHeader } from '@/components/layout/SiteHeader'
 import { AssetSlot } from '@/components/ui'
 import { ROLE_LABELS, type Role } from '@/types'
 
-const WORKFLOW = ['Request', 'Quote', 'Finance', 'GM', 'Owner', 'Purchase', 'Complete']
+const WORKFLOW = ['Request', 'Project Manager', 'Finance', 'Purchase', 'Delivery']
 
 const STAGES = [
   { n: '01', title: 'Finance', body: 'Checks pricing and budget before anything moves. The first gate on every spend.' },
-  { n: '02', title: 'General Manager', body: 'Confirms the work is operationally justified on site.' },
-  { n: '03', title: 'Owner', body: 'Final sign-off where required, with the full financial picture.' },
+  { n: '02', title: 'Project Manager', body: 'Confirms the work is operationally justified on assigned projects.' },
+  { n: '03', title: 'CEO', body: 'Provides final sign-off with the full financial picture.' },
 ]
 
 // Role cards: drop cut-out PNGs (transparent background) into public/assets/roles/
 const ROLES: { role: Role; blurb: string; bg: string; fg: string }[] = [
   { role: 'site_engineer', blurb: 'Raises purchase requests for site needs and tracks status.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
-  { role: 'finance', blurb: 'Gives final approval and buys the approved items.', bg: 'var(--sun)', fg: 'var(--ink)' },
-  { role: 'project_manager', blurb: 'Reviews requests for assigned projects before Finance.', bg: 'var(--accent)', fg: '#ffffff' },
-  { role: 'ceo', blurb: 'Oversight across projects — view and rare requests, never approvals.', bg: 'var(--panel-dark)', fg: '#ffffff' },
+  { role: 'finance', blurb: 'Checks pricing and budget before requests move to project review.', bg: 'var(--sun)', fg: 'var(--ink)' },
+  { role: 'project_manager', blurb: 'Reviews requests for assigned projects after Finance.', bg: 'var(--accent)', fg: '#ffffff' },
+  { role: 'ceo', blurb: 'Provides executive oversight and final approval on requests.', bg: 'var(--panel-dark)', fg: '#ffffff' },
   { role: 'admin', blurb: 'Creates users, projects and the rules the workflow follows.', bg: '#e6e1da', fg: 'var(--ink)' },
+  { role: 'shopkeeper', blurb: 'Supports the shop and day-to-day site operations.', bg: 'var(--sun-soft)', fg: 'var(--ink)' },
 ]
 
 const BEFORE = ['Phone calls for every request', 'Screenshots as the only record', 'No idea what is pending or late', 'Manual follow-ups on every purchase']
@@ -129,7 +130,7 @@ export function Home() {
               </span>
               <div>
                 <p className="text-sm font-semibold">PR-2026-014 approved</p>
-                <p className="text-xs text-white/60">Finance → GM → Owner</p>
+                <p className="text-xs text-white/60">Project Manager → Finance</p>
               </div>
             </div>
           </div>
@@ -151,7 +152,7 @@ export function Home() {
               </p>
               <div className="mt-6 flex items-center justify-between gap-3">
                 <div className="flex -space-x-2">
-                  {['EM', 'FI', 'GM', 'OW', 'AD'].map((i, idx) => (
+                  {['SE', 'FI', 'PM', 'CE', 'AD', 'SH'].map((i, idx) => (
                     <span
                       key={i}
                       className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-[var(--sun)] text-xs font-bold"
@@ -236,7 +237,7 @@ export function Home() {
             <p className="max-w-xs text-sm text-[var(--ink-soft)]">Each role sees exactly what's waiting on them, and nothing they shouldn't.</p>
           </div>
 
-          <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             {ROLES.map((r) => (
               <article
                 key={r.role}

@@ -13,12 +13,12 @@ export const STATUS_LABELS: Record<RequestStatus, string> = {
   draft: 'Draft',
   quote_received: 'Quote Received',
   awaiting_finance: 'Awaiting Finance',
-  awaiting_gm: 'Awaiting GM',
-  awaiting_owner: 'Awaiting Owner',
+  awaiting_gm: 'Awaiting Project Manager',
+  awaiting_owner: 'Awaiting CEO',
   approved: 'Approved',
   rejected: 'Rejected',
-  purchased: 'Purchased',
-  completed: 'Completed',
+  purchased: 'In progress',
+  completed: 'Delivered',
 }
 
 export const STATUS_COLORS: Record<RequestStatus, string> = {
@@ -34,6 +34,7 @@ export const STATUS_COLORS: Record<RequestStatus, string> = {
 }
 
 export const ATTACHMENT_TYPE_LABELS: Record<AttachmentType, string> = {
+  proforma: 'Proforma',
   quotation: 'Quotation',
   invoice: 'Invoice',
   receipt: 'Receipt',

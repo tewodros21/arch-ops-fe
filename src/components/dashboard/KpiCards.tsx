@@ -3,14 +3,15 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { isSameMonth } from 'date-fns'
 import { AlarmClock, BadgeCheck, HardHat, Hourglass, Inbox, ShoppingBag, type LucideIcon } from 'lucide-react'
-import { STATUS_LABELS, type LaborRequest, type Profile, type PurchaseRequest, type RequestStatus } from '@/types'
+import { STATUS_LABELS, type LaborRequest, type Profile, type PurchaseRequest, type Role, type RequestStatus } from '@/types'
 import { approvedValue, compactMoney, DONE, IN_REVIEW, isOverdue, isStuck, money, PAID, STUCK_HOURS } from './metrics'
 
-const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
-  employee: null,
+const AWAITING_BY_ROLE: Record<Role, RequestStatus | null> = {
+  site_engineer: null,
+  project_manager: 'awaiting_gm',
+  ceo: null,
   finance: 'awaiting_finance',
-  general_manager: 'awaiting_gm',
-  owner: 'awaiting_owner',
+  shopkeeper: null,
   admin: null,
 }
 

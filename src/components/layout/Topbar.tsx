@@ -58,14 +58,16 @@ export function Topbar() {
         )}
       </button>
 
-      <Link
-        to={{ search: create.search }}
-        aria-label={create.aria}
-        className="focus-ring hidden h-14 shrink-0 items-center justify-center gap-2 rounded-full bg-[var(--panel-dark)] px-6 text-sm font-semibold text-white transition-transform active:scale-[0.98] md:flex"
-      >
-        <create.icon size={18} />
-        {create.label}
-      </Link>
+      {create && (
+        <Link
+          to={{ search: create.search }}
+          aria-label={create.aria}
+          className="focus-ring hidden h-14 shrink-0 items-center justify-center gap-2 rounded-full bg-[var(--panel-dark)] px-6 text-sm font-semibold text-white transition-transform active:scale-[0.98] md:flex"
+        >
+          <create.icon size={18} />
+          {create.label}
+        </Link>
+      )}
       {notifOpen && (
         <NotificationsPanel
           items={items}

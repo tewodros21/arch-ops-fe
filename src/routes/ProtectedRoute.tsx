@@ -15,9 +15,11 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (!profile) return <Navigate to="/login" replace />
 
-  // First-login gate: temporary password must be changed before using the app
-  if (profile.must_change_password && location.pathname !== '/account') {
-    return <Navigate to="/account" replace state={{ forcePasswordChange: true }} />
+  if (profile.must_change_password && location.pathname !== '/change-password') {
+    return <Navigate to="/change-password" replace />
+  }
+  if (!profile.must_change_password && location.pathname === '/change-password') {
+    return <Navigate to="/dashboard" replace />
   }
 
   return <>{children}</>

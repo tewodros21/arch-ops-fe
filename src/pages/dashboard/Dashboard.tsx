@@ -19,14 +19,16 @@ import {
   type AuditEvent,
   type LaborRequest,
   type PurchaseRequest,
+  type Role,
   type RequestStatus,
 } from '@/types'
 
-const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
-  employee: null,
+const AWAITING_BY_ROLE: Record<Role, RequestStatus | null> = {
+  site_engineer: null,
+  project_manager: 'awaiting_gm',
+  ceo: null,
   finance: 'awaiting_finance',
-  general_manager: 'awaiting_gm',
-  owner: 'awaiting_owner',
+  shopkeeper: null,
   admin: null,
 }
 
@@ -34,15 +36,15 @@ const PIPELINE: { title: string; statuses: RequestStatus[] }[] = [
   { title: 'New', statuses: ['draft', 'quote_received'] },
   { title: 'In review', statuses: IN_REVIEW },
   { title: 'Approved', statuses: ['approved'] },
-  { title: 'Completed', statuses: ['purchased', 'completed'] },
+  { title: 'Fulfillment', statuses: ['purchased', 'completed'] },
 ]
 
 // How far along the approval chain a request is, for the progress bars
 const PROGRESS: Record<RequestStatus, number> = {
   draft: 8,
   quote_received: 20,
-  awaiting_finance: 40,
-  awaiting_gm: 62,
+  awaiting_finance: 62,
+  awaiting_gm: 40,
   awaiting_owner: 84,
   approved: 100,
   rejected: 100,
@@ -78,6 +80,11 @@ export function Dashboard() {
 
   useEffect(() => {
     async function load() {
+      if (profile?.role === 'shopkeeper') {
+        setRequests(await fetchPurchaseRequests())
+        setLoading(false)
+        return
+      }
       const since = startOfDay(subDays(new Date(), HEAT_DAYS - 1)).toISOString()
       const [reqs, laborRows, events] = await Promise.all([
         fetchPurchaseRequests(),
@@ -90,7 +97,7 @@ export function Dashboard() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [profile?.role])
 
   if (!profile) return null
 
@@ -136,6 +143,57 @@ export function Dashboard() {
   )
 
   const activeLabor = labor.filter((l) => !['completed', 'cancelled'].includes(l.status))
+
+  if (profile.role === 'shopkeeper') {
+    const fulfillment = requests.filter((request) => ['purchased', 'completed'].includes(request.status))
+    const inProgress = fulfillment.filter((request) => request.status === 'purchased')
+    const delivered = fulfillment.filter((request) => request.status === 'completed')
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="text-3xl font-black tracking-tight text-[var(--ink)]">Purchase fulfillment</h1>
+          <p className="mt-1 text-sm text-[var(--ink-soft)]">Track purchased items and confirm deliveries.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <Link to="/requests?status=done" className="focus-ring rounded-[1.75rem] bg-white p-5">
+            <p className="text-sm text-[var(--ink-soft)]">In progress</p>
+            <p className="mt-3 text-4xl font-black text-[var(--ink)]">{loading ? '–' : inProgress.length}</p>
+          </Link>
+          <Link to="/requests?status=done" className="focus-ring rounded-[1.75rem] bg-white p-5">
+            <p className="text-sm text-[var(--ink-soft)]">Delivered</p>
+            <p className="mt-3 text-4xl font-black text-[var(--ink)]">{loading ? '–' : delivered.length}</p>
+          </Link>
+        </div>
+        <section className="rounded-[1.75rem] bg-white p-6">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 className="text-xl font-bold text-[var(--ink)]">Ready for delivery tracking</h2>
+            <Link to="/requests" className="text-sm font-semibold text-[var(--accent)]">View all</Link>
+          </div>
+          {loading ? (
+            <p className="py-8 text-center text-sm text-slate-500">Loading requests…</p>
+          ) : fulfillment.length === 0 ? (
+            <p className="py-8 text-center text-sm text-slate-500">No purchased requests yet.</p>
+          ) : (
+            <ul className="divide-y divide-black/[0.05]">
+              {fulfillment.map((request) => (
+                <li key={request.id}>
+                  <Link to={`/requests/${request.id}`} className="focus-ring flex items-center justify-between gap-3 py-4">
+                    <span className="min-w-0">
+                      <span className="block truncate text-xs text-slate-500">{request.request_number}</span>
+                      <span className="block truncate font-semibold text-[var(--ink)]">{request.title}</span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-[var(--canvas)] px-3 py-1 text-xs font-semibold text-[var(--ink)]">
+                      {request.status === 'purchased' ? 'In progress' : 'Delivered'}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -292,7 +350,7 @@ export function Dashboard() {
         })}
       </div>
 
-      <SpendCharts scoped={scoped} loading={loading} companyWide={profile.role !== 'employee'} />
+      <SpendCharts scoped={scoped} loading={loading} companyWide={profile.role !== 'site_engineer'} />
 
       {activeLabor.length > 0 && (
         <section>

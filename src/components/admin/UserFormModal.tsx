@@ -21,7 +21,7 @@ function needsProjects(role: Role) {
 }
 
 // There is no public sign-up: an admin creates the account here with a temporary password
-// and shares it; the person changes it on their Account page.
+// and shares it; the person must change it before using the app.
 export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSaved: (person: Profile) => void }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -91,7 +91,7 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
   return (
     <FormModal
       title="Add a person"
-      description="They sign in with this email and temporary password, then change it on their Account page."
+      description="They sign in with this email and temporary password, then change it before using the app."
       icon={UserPlus}
       submitLabel="Create account"
       onSubmit={submit}
