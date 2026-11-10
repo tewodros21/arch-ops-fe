@@ -392,6 +392,7 @@ paths:
         '204': { description: Deleted }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/InUse' }
 
   # ── Site employees ────────────────────────────────────────────────────────
   /site-employees/:
@@ -1314,7 +1315,7 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
-          example: { detail: 'Project has requests, archive it instead', code: in_use }
+          example: { detail: 'This item is still in use; archive it instead', code: in_use }
 
   schemas:
     # ── Enums ──

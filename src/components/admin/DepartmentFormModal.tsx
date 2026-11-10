@@ -22,7 +22,7 @@ export function DepartmentFormModal({ department, onClose, onSaved }: { departme
       return false
     }
     notify.success(department ? 'Department saved' : 'Department added')
-    // Site employees stay under the old name after a rename, so the new name starts empty
+    // Site employees stay under the old name after a rename, so the new name starts empty.
     onSaved({ ...data, member_count: data.member_count ?? (renamed ? 0 : (department?.member_count ?? 0)) })
     return true
   }

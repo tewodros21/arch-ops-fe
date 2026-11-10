@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
@@ -42,7 +42,12 @@ interface QuotationRow {
 
 const EMPTY_ITEM: ItemRow = { name: '', quantity: '1', unit: 'unit', unit_price: '', description: '' }
 const EMPTY_QUOTATION: QuotationRow = { vendor_id: '', amount: '', valid_until: '', notes: '', file: null }
-const UNITS = ['unit', 'pcs', 'box', 'set', 'm', 'm²', 'm³', 'kg', 'ton', 'litre', 'hour', 'day']
+const UNITS = [
+  'unit', 'each', 'pcs', 'pair', 'pack', 'set', 'box', 'bag', 'sack', 'bucket', 'drum',
+  'm', 'cm', 'mm', 'm²', 'm³', 'ft', 'roll', 'sheet', 'board', 'length', 'bundle', 'pallet', 'load',
+  'brick', 'block', 'tile', 'kg', 'g', 'ton', 'litre', 'mL',
+  'hour', 'day', 'week', 'month', 'year', 'service', 'lot', 'license', 'seat',
+]
 
 const STEPS: Step[] = [
   { title: 'Details', hint: 'What you need and for which project' },
@@ -73,7 +78,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const [showErrors, setShowErrors] = useState(false)
   const [busy, setBusy] = useState(false)
   const [loadingEdit, setLoadingEdit] = useState(editing)
-  const [projectsLoading, setProjectsLoading] = useState(true)
+  const [loadingProjects, setLoadingProjects] = useState(true)
+  const [projectLoadFailed, setProjectLoadFailed] = useState(false)
   const [touched, setTouched] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [vendors, setVendors] = useState<Vendor[]>([])
@@ -95,16 +101,38 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     required_date: '',
   })
 
-  useEffect(() => {
-    fetchProjects().then((rows) => {
-      const assigned = (profile?.role === 'site_engineer' || profile?.role === 'project_manager') && !profile.has_all_projects
-        ? rows.filter((project) => profile.project_ids.includes(project.id))
-        : rows
-      setProjects(assigned)
-    }).finally(() => setProjectsLoading(false))
-    fetchDepartments().then(setDepartments)
-    fetchActiveVendors().then(setVendors)
+  const applyProjectsResult = useCallback(({ data, error }: Awaited<ReturnType<typeof fetchProjects>>) => {
+    setLoadingProjects(false)
+    if (error) {
+      console.error('Error fetching projects:', error)
+      setProjectLoadFailed(true)
+      notify.error('Could not load projects')
+      return
+    }
+    setProjectLoadFailed(false)
+    const assigned = (profile?.role === 'site_engineer' || profile?.role === 'project_manager') && !profile.has_all_projects
+      ? (data ?? []).filter((project) => profile.project_ids.includes(project.id))
+      : data ?? []
+    setProjects(assigned)
   }, [profile])
+
+  const loadProjects = useCallback(async () => {
+    setLoadingProjects(true)
+    setProjectLoadFailed(false)
+    applyProjectsResult(await fetchProjects())
+  }, [applyProjectsResult])
+
+  useEffect(() => {
+    let active = true
+    void fetchProjects().then((result) => {
+      if (active) applyProjectsResult(result)
+    })
+    fetchActiveVendors().then(setVendors)
+    fetchDepartments().then(setDepartments)
+    return () => {
+      active = false
+    }
+  }, [applyProjectsResult])
 
   // Edit mode: prefill from the saved request
   useEffect(() => {
@@ -172,9 +200,16 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const lowestQuote = quoteAmounts.length ? Math.min(...quoteAmounts) : null
   const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || (r.unit_price !== '' && Number(r.unit_price) < 0))
   const badQuote = newQuotes.find((quote) => !quote.vendor_id || !(Number(quote.amount) > 0))
+  const projectError = loadingProjects
+    ? 'Projects are still loading. Please wait a moment.'
+    : projectLoadFailed
+      ? 'Could not load projects. Try again.'
+      : projects.length === 0
+        ? 'No active projects are assigned to your account, or none are available. Ask an admin to add or assign a project.'
+        : 'Choose at least one project for this purchase'
 
   const stepErrors: Record<number, string | null> = {
-    0: !form.title.trim() ? 'Add a short title for this request' : form.project_ids.length === 0 ? 'Choose at least one project for this purchase' : null,
+    0: !form.title.trim() ? 'Add a short title for this request' : form.project_ids.length === 0 ? projectError : null,
     1: filledItems.length === 0 ? 'Add at least one item to this request' : badItem ? 'Each item needs a name and a quantity' : null,
     2: !(estimate > 0) ? 'Enter an estimated amount to continue' : null,
     3: badQuote ? 'Each quote needs a vendor and an amount' : null,
@@ -391,9 +426,26 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                   </button>
                 )
               })}
-              {projects.length === 0 && (
+              {loadingProjects && <p className="text-sm text-slate-500">Loading projects…</p>}
+              {!loadingProjects && projectLoadFailed && (
+                <div role="alert" className="text-sm text-[var(--accent)]">
+                  Could not load projects.{' '}
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => {
+                      setLoadingProjects(true)
+                      setProjectLoadFailed(false)
+                      void loadProjects()
+                    }}
+                  >
+                    Try again
+                  </button>
+                </div>
+              )}
+              {!loadingProjects && !projectLoadFailed && projects.length === 0 && (
                 <p className="text-sm text-slate-500">
-                  {projectsLoading ? 'Loading projects…' : 'No active projects are assigned to your account.'}
+                  No active projects are available or assigned to your account. Ask an admin to add or assign a project.
                 </p>
               )}
             </div>

@@ -36,11 +36,16 @@ export function DepartmentsTab() {
 
   async function remove(d: Department) {
     const count = d.member_count ?? 0
+    if (count > 0) {
+      notify.warning('This department has users assigned and cannot be deleted. Archive it instead.')
+      return
+    }
+
     const ok = await confirm({
       title: `Delete ${d.name}?`,
       body: count
         ? `${count} ${count === 1 ? 'site employee is' : 'site employees are'} still in this department. Move them first, or archive instead.`
-        : 'Past requests keep their department name. This only removes it from the list.',
+        : 'Past purchase requests keep their saved department name. This only removes it from the list.',
       confirmLabel: 'Delete department',
       tone: 'danger',
       icon: Trash2,
@@ -48,7 +53,11 @@ export function DepartmentsTab() {
     if (!ok) return
     const { error } = await deleteDepartment(d.id)
     if (error) {
-      notify.error(`Could not delete department: ${error.message}`)
+      notify.error(
+        error.code === 'in_use'
+          ? 'This department still has users assigned. Archive it instead.'
+          : `Could not delete department: ${error.message}`,
+      )
       return
     }
     setDepartments((list) => list.filter((i) => i.id !== d.id))

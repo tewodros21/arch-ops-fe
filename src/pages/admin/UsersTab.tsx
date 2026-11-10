@@ -205,7 +205,14 @@ function EditPersonModal({ person, onClose, onSaved }: { person: Profile; onClos
   const projectsError = touched && showProjects && !allProjects && projectIds.length === 0 ? 'Assign at least one project, or choose all projects' : null
 
   useEffect(() => {
-    fetchProjects().then((rows) => setProjects(rows.map((p) => ({ id: p.id, name: p.name, code: p.code }))))
+    fetchProjects().then(({ data, error }) => {
+      if (error) {
+        console.error('Error fetching projects:', error)
+        notify.error('Could not load projects')
+        return
+      }
+      setProjects((data ?? []).map((p) => ({ id: p.id, name: p.name, code: p.code })))
+    })
   }, [])
 
   const availableProjects = projects.filter((p) => !projectIds.includes(p.id))

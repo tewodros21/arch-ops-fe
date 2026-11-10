@@ -33,7 +33,14 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
   const [touched, setTouched] = useState(false)
 
   useEffect(() => {
-    fetchProjects().then((rows) => setProjects(rows.map((p) => ({ id: p.id, name: p.name, code: p.code }))))
+    fetchProjects().then(({ data, error }) => {
+      if (error) {
+        console.error('Error fetching projects:', error)
+        notify.error('Could not load projects')
+        return
+      }
+      setProjects((data ?? []).map((p) => ({ id: p.id, name: p.name, code: p.code })))
+    })
   }, [])
 
   const showProjects = needsProjects(role)

@@ -1,8 +1,9 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { format, isSameMonth, startOfMonth, subMonths } from 'date-fns'
 import type { PurchaseRequest, RequestStatus } from '@/types'
-import { ChartCard, EmptyChart, Legend, MoneyTooltip } from './kit'
+import { ChartCard, EmptyChart, Legend, MoneyTooltip, RangeSelect } from './kit'
 import { approvedValue, AXIS_TICK, COLORS, compactMoney, DONE, IN_REVIEW, money, PAID, paidValue } from './metrics'
 
 const SPEND_SERIES = [
@@ -19,7 +20,12 @@ const STATUS_GROUPS: { label: string; statuses: RequestStatus[]; color: string; 
 ]
 
 const TOP_N = 5
-const MONTHS = 6
+const TREND_OPTIONS = [
+  { value: 3, label: 'Last 3 months' },
+  { value: 6, label: 'Last 6 months' },
+  { value: 12, label: 'Last 12 months' },
+  { value: 24, label: 'Last 24 months' },
+]
 
 type SpendRow = { name: string; fullName: string; approved: number; paid: number }
 
@@ -40,14 +46,14 @@ function spendBy(requests: PurchaseRequest[], keyOf: (r: PurchaseRequest) => str
   return [...rows.values()].sort((a, b) => b.approved - a.approved).slice(0, TOP_N)
 }
 
-export function SpendCharts({ scoped, loading, companyWide }: { scoped: PurchaseRequest[]; loading: boolean; companyWide: boolean }) {
-  const scope = companyWide ? 'Company' : 'My requests'
+export function SpendCharts({ scoped, loading }: { scoped: PurchaseRequest[]; loading: boolean }) {
+  const [trendMonths, setTrendMonths] = useState(6)
   const byProject = spendBy(scoped, (r) => r.project?.name ?? 'No project', 16)
   const byDepartment = spendBy(scoped, (r) => r.department?.trim() || 'Unassigned', 12)
 
   // ── Monthly trend: approved value by month raised, paid value by month purchased ──
   const thisMonth = startOfMonth(new Date())
-  const months = Array.from({ length: MONTHS }, (_, i) => subMonths(thisMonth, MONTHS - 1 - i))
+  const months = Array.from({ length: trendMonths }, (_, i) => subMonths(thisMonth, trendMonths - 1 - i))
   const trend = months.map((m) => ({
     month: format(m, 'MMM'),
     fullName: format(m, 'MMMM yyyy'),
@@ -69,7 +75,6 @@ export function SpendCharts({ scoped, loading, companyWide }: { scoped: Purchase
       <ChartCard
         title="Spend by project"
         subtitle={topProject ? `${topProject.fullName} leads with ${money(topProject.approved)} approved` : 'Top projects by approved value'}
-        pill={scope}
       >
         <Legend items={[...SPEND_SERIES]} shape="bar" />
         <div className="mt-2 h-56">
@@ -95,7 +100,6 @@ export function SpendCharts({ scoped, loading, companyWide }: { scoped: Purchase
       <ChartCard
         title="Spend by department"
         subtitle={`${money(byDepartment.reduce((s, d) => s + d.paid, 0))} paid of ${money(byDepartment.reduce((s, d) => s + d.approved, 0))} approved`}
-        pill={scope}
       >
         <Legend items={[...SPEND_SERIES]} shape="bar" />
         <div className="mt-2 h-56">
@@ -118,7 +122,7 @@ export function SpendCharts({ scoped, loading, companyWide }: { scoped: Purchase
       </ChartCard>
 
       {/* Requests by status */}
-      <ChartCard title="Requests by status" subtitle={`${total} request${total === 1 ? '' : 's'} in total`} pill={scope}>
+      <ChartCard title="Requests by status" subtitle={`${total} request${total === 1 ? '' : 's'} in total`}>
         <div className="mt-5 flex h-3 gap-1">
           {total === 0 ? (
             <span className="h-full flex-1 rounded-full bg-[var(--cell)]" />
@@ -150,7 +154,11 @@ export function SpendCharts({ scoped, loading, companyWide }: { scoped: Purchase
       </ChartCard>
 
       {/* Monthly purchasing trend */}
-      <ChartCard title="Purchasing trend" subtitle={`${money(trendApproved)} approved · ${money(trendPaid)} paid`} pill={`Last ${MONTHS} months`}>
+      <ChartCard
+        title="Purchasing trend"
+        subtitle={`${money(trendApproved)} approved · ${money(trendPaid)} paid`}
+        action={<RangeSelect value={trendMonths} onChange={setTrendMonths} options={TREND_OPTIONS} ariaLabel="Purchasing trend time range" />}
+      >
         <Legend items={[...SPEND_SERIES]} />
         <div className="mt-2 h-56">
           <ResponsiveContainer width="100%" height="100%">
