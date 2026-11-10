@@ -4,7 +4,7 @@ import { formatCurrency } from '@/utils'
 
 export const COLORS = { ink: '#181412', sun: '#f6b73c', accent: '#e4532d', stone: '#8a7f78', sand: '#e6e1da' }
 
-export const IN_REVIEW: RequestStatus[] = ['awaiting_finance', 'awaiting_gm', 'awaiting_owner']
+export const IN_REVIEW: RequestStatus[] = ['awaiting_finance', 'awaiting_gm']
 export const DONE: RequestStatus[] = ['approved', 'purchased', 'completed']
 export const PAID: RequestStatus[] = ['purchased', 'completed']
 

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
-import { ArrowRight, Building2, CalendarDays, FileText, Info, Package, Pencil, Plus, ReceiptText, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowRight, Building2, CalendarDays, FileText, Package, Pencil, Plus, ReceiptText, RotateCcw, Trash2, Upload, X } from 'lucide-react'
 import { notify } from '@/lib/notify'
 import { ACCEPT_ATTR, formatBytes, validateFile } from '@/lib/storage'
 import { EDITABLE_STATUSES, submitRequest } from '@/lib/workflow'
@@ -10,8 +10,8 @@ import { useAuth } from '@/context/AuthContext'
 import { formatCurrency } from '@/utils'
 import { ReviewTile, StepField as Field, StepModal, type Step } from '@/components/ui/StepModal'
 import {
-  addQuotation,
   announcePurchaseSaved,
+  addQuotation,
   createPurchaseRequest,
   deleteQuotations,
   fetchActiveVendors,
@@ -65,7 +65,6 @@ function money(value: string | number) {
   return Number.isFinite(n) && n > 0 ? formatCurrency(n) : '—'
 }
 
-// A row counts once any field differs from the blank template
 const itemStarted = (r: ItemRow) => !!(r.name.trim() || r.unit_price || r.description.trim())
 const quoteStarted = (q: QuotationRow) => !!(q.vendor_id || q.amount || q.notes || q.valid_until || q.file)
 const lineTotal = (r: ItemRow) => (Number(r.quantity) || 0) * (Number(r.unit_price) || 0)
@@ -95,13 +94,14 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     title: '',
     description: '',
     project_id: '',
+    project_ids: [] as string[],
     department: profile?.department ?? '',
     estimated_amount: '',
     justification: '',
     required_date: '',
   })
 
-  function applyProjectsResult({ data, error }: Awaited<ReturnType<typeof fetchProjects>>) {
+  const applyProjectsResult = useCallback(({ data, error }: Awaited<ReturnType<typeof fetchProjects>>) => {
     setLoadingProjects(false)
     if (error) {
       console.error('Error fetching projects:', error)
@@ -110,12 +110,17 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       return
     }
     setProjectLoadFailed(false)
-    setProjects(data ?? [])
-  }
+    const assigned = (profile?.role === 'site_engineer' || profile?.role === 'project_manager') && !profile.has_all_projects
+      ? (data ?? []).filter((project) => profile.project_ids.includes(project.id))
+      : data ?? []
+    setProjects(assigned)
+  }, [profile])
 
-  async function loadProjects() {
+  const loadProjects = useCallback(async () => {
+    setLoadingProjects(true)
+    setProjectLoadFailed(false)
     applyProjectsResult(await fetchProjects())
-  }
+  }, [applyProjectsResult])
 
   useEffect(() => {
     let active = true
@@ -127,7 +132,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     return () => {
       active = false
     }
-  }, [])
+  }, [applyProjectsResult])
 
   // Edit mode: prefill from the saved request
   useEffect(() => {
@@ -144,6 +149,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         title: r.title,
         description: r.description ?? '',
         project_id: r.project_id,
+        project_ids: r.project_ids?.length ? r.project_ids : [r.project_id],
         department: r.department ?? '',
         estimated_amount: String(r.estimated_amount ?? ''),
         justification: r.justification ?? '',
@@ -180,32 +186,31 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
 
   function updateQuotation(index: number, patch: Partial<QuotationRow>) {
     setTouched(true)
-    setQuotations((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+    setQuotations((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }
 
   const filledItems = items.filter(itemStarted)
   const itemsTotal = filledItems.reduce((sum, r) => sum + lineTotal(r), 0)
   const followsItems = !amountOverridden && itemsTotal > 0
   const estimate = followsItems ? itemsTotal : Number(form.estimated_amount)
-  const keptQuotes = existingQuotes.filter((q) => !removedQuoteIds.includes(q.id))
+  const keptQuotes = existingQuotes.filter((quote) => !removedQuoteIds.includes(quote.id))
   const newQuotes = quotations.filter(quoteStarted)
   const quoteCount = keptQuotes.length + newQuotes.length
-  const allQuoteAmounts = [...keptQuotes.map((q) => Number(q.amount)), ...newQuotes.map((q) => Number(q.amount)).filter((n) => n > 0)]
-  const lowestQuote = allQuoteAmounts.length ? Math.min(...allQuoteAmounts) : null
-
+  const quoteAmounts = [...keptQuotes.map((quote) => Number(quote.amount)), ...newQuotes.map((quote) => Number(quote.amount)).filter((amount) => amount > 0)]
+  const lowestQuote = quoteAmounts.length ? Math.min(...quoteAmounts) : null
   const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || (r.unit_price !== '' && Number(r.unit_price) < 0))
-  const badQuote = newQuotes.find((q) => !q.vendor_id || !(Number(q.amount) > 0))
+  const badQuote = newQuotes.find((quote) => !quote.vendor_id || !(Number(quote.amount) > 0))
   const projectError = loadingProjects
     ? 'Projects are still loading. Please wait a moment.'
     : projectLoadFailed
       ? 'Could not load projects. Try again.'
       : projects.length === 0
-        ? 'No active projects are available. Ask an admin to add or activate one before creating a purchase request.'
-        : 'Choose which project this purchase is for'
+        ? 'No active projects are assigned to your account, or none are available. Ask an admin to add or assign a project.'
+        : 'Choose at least one project for this purchase'
 
   const stepErrors: Record<number, string | null> = {
-    0: !form.title.trim() ? 'Add a short title for this request' : !form.project_id ? projectError : null,
-    1: badItem ? 'Each item needs a name and a quantity' : null,
+    0: !form.title.trim() ? 'Add a short title for this request' : form.project_ids.length === 0 ? projectError : null,
+    1: filledItems.length === 0 ? 'Add at least one item to this request' : badItem ? 'Each item needs a name and a quantity' : null,
     2: !(estimate > 0) ? 'Enter an estimated amount to continue' : null,
     3: badQuote ? 'Each quote needs a vendor and an amount' : null,
     4: null,
@@ -245,6 +250,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       return
     }
     if (submitAfter && quoteCount === 0) {
+      setStep(3)
       notify.warning('Add a vendor quote before submitting')
       return
     }
@@ -254,6 +260,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       title: form.title.trim(),
       description: form.description.trim(),
       project_id: form.project_id,
+      project_ids: form.project_ids,
       department: form.department.trim() || 'General',
       estimated_amount: estimate,
       justification: form.justification.trim(),
@@ -289,18 +296,24 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         description: r.description.trim() || null,
       })),
     )
-    if (itemsError) notify.warning(`Line items were not saved: ${itemsError}`)
+    if (itemsError) {
+      setBusy(false)
+      notify.error(`Line items were not saved: ${itemsError}`)
+      announcePurchaseSaved(requestId)
+      navigate(`/requests/${requestId}`)
+      return
+    }
 
     const { error: removeError } = await deleteQuotations(removedQuoteIds)
     if (removeError) notify.warning(`A removed quote could not be deleted: ${removeError}`)
 
-    for (const q of newQuotes) {
+    for (const quote of newQuotes) {
       const { error, fileError } = await addQuotation(requestId, {
-        vendor_id: q.vendor_id,
-        amount: Number(q.amount),
-        valid_until: q.valid_until || null,
-        notes: q.notes.trim() || null,
-        file: q.file,
+        vendor_id: quote.vendor_id,
+        amount: Number(quote.amount),
+        valid_until: quote.valid_until || null,
+        notes: quote.notes.trim() || null,
+        file: quote.file,
       })
       if (error) notify.warning(`A vendor quotation was not saved: ${error}`)
       else if (fileError) notify.warning(`Quote file could not be uploaded: ${fileError}`)
@@ -309,9 +322,9 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     if (submitAfter) {
       const { error } = await submitRequest(requestId)
       if (error) notify.error(`Saved as draft, not submitted: ${error}`)
-      else notify.success('Request submitted for Finance review')
+      else notify.success('Request submitted for Project Manager review')
     } else {
-      notify.success(editing ? 'Draft changes saved' : 'Draft saved, submit when quotes are ready')
+      notify.success(editing ? 'Draft changes saved' : 'Draft saved; add quotations before submitting')
     }
 
     setBusy(false)
@@ -319,7 +332,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     navigate(`/requests/${requestId}`)
   }
 
-  const project = projects.find((p) => p.id === form.project_id)
+  const selectedProjects = projects.filter((p) => form.project_ids.includes(p.id))
+  const project = selectedProjects[0]
   const err = (s: number, when: boolean) => showErrors && step === s && when
   // Keep an unlisted saved department selectable
   const departmentNames = departments.map((d) => d.name)
@@ -335,7 +349,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       onBack={() => setStep((s) => s - 1)}
       onGoTo={goTo}
       onSubmit={() => save(true)}
-      submitLabel="Submit for Finance review"
+      submitLabel="Submit for Project Manager review"
       submitDisabled={quoteCount === 0}
       secondaryAction={{ label: editing ? 'Save changes' : 'Save as draft', onClick: () => save(false) }}
       discardPrompt={editing ? 'Discard your changes?' : 'Discard this request?'}
@@ -347,17 +361,15 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
           <p className="truncate text-sm text-white">{form.title || 'Untitled request'}</p>
           <div className="flex items-end justify-between gap-2">
             <span className="truncate text-xs text-white/50">
-              {project?.name ?? 'No project yet'}
+              {selectedProjects.map((p) => p.name).join(', ') || 'No project yet'}
               {filledItems.length > 0 && ` · ${filledItems.length} item${filledItems.length === 1 ? '' : 's'}`}
             </span>
             <span className="text-xl font-bold text-white">{money(estimate)}</span>
           </div>
           <div className="flex items-center gap-1.5 border-t border-white/10 pt-3 text-[11px] text-white/55">
-            <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 font-semibold text-[var(--ink)]">Finance</span>
+            <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 font-semibold text-[var(--ink)]">Project Manager</span>
             <ArrowRight size={12} />
-            <span>GM</span>
-            <ArrowRight size={12} />
-            <span>Owner</span>
+            <span>Finance</span>
           </div>
         </>
       }
@@ -375,15 +387,21 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             />
           </Field>
 
-          <Field label="Project" error={err(0, !form.project_id)}>
+          <Field label="Project(s)" error={err(0, form.project_ids.length === 0)}>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {projects.map((p) => {
-                const active = form.project_id === p.id
+                const active = form.project_ids.includes(p.id)
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => update('project_id', p.id)}
+                    onClick={() => {
+                      const projectIds = active
+                        ? form.project_ids.filter((id) => id !== p.id)
+                        : [...form.project_ids, p.id]
+                      setTouched(true)
+                      setForm((current) => ({ ...current, project_ids: projectIds, project_id: projectIds[0] ?? '' }))
+                    }}
                     aria-pressed={active}
                     className={clsx(
                       'focus-ring flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all',
@@ -426,7 +444,9 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 </div>
               )}
               {!loadingProjects && !projectLoadFailed && projects.length === 0 && (
-                <p className="text-sm text-slate-500">No active projects are available. Ask an admin to add or activate a project before creating a purchase request.</p>
+                <p className="text-sm text-slate-500">
+                  No active projects are available or assigned to your account. Ask an admin to add or assign a project.
+                </p>
               )}
             </div>
           </Field>
@@ -638,117 +658,106 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       {!loadingEdit && step === 3 && (
         <>
           <p className="text-sm text-[var(--ink-soft)]">
-            At least one vendor quote is needed to submit. You can save a draft now and add quotes later.
+            Add vendor quotations for comparison. At least one quotation is required before submitting.
           </p>
-
           {keptQuotes.length > 0 && (
             <div className="space-y-2">
-              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Saved quotes</p>
-              {keptQuotes.map((q) => (
-                <div key={q.id} className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3">
+              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Saved quotations</p>
+              {keptQuotes.map((quote) => (
+                <div key={quote.id} className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3">
                   <div className="min-w-0">
-                    <p className="flex flex-wrap items-center gap-2 truncate text-sm font-semibold text-[var(--ink)]">
-                      {q.vendor?.name ?? 'Vendor'}
-                      {lowestQuote !== null && allQuoteAmounts.length > 1 && Number(q.amount) === lowestQuote && (
-                        <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 text-[11px]">Lowest</span>
-                      )}
-                    </p>
-                    <p className="truncate text-xs text-slate-500">
-                      {q.valid_until ? `Valid until ${format(new Date(`${q.valid_until}T00:00`), 'MMM d, yyyy')}` : 'No expiry set'}
-                      {q.notes ? ` · ${q.notes}` : ''}
-                    </p>
+                    <p className="truncate text-sm font-semibold text-[var(--ink)]">{quote.vendor?.name ?? 'Vendor'} · {money(quote.amount)}</p>
+                    {quote.notes && <p className="truncate text-xs text-slate-500">{quote.notes}</p>}
                   </div>
-                  <span className="flex shrink-0 items-center gap-1">
-                    <span className="text-base font-bold text-[var(--ink)]">{money(q.amount)}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTouched(true)
-                        setRemovedQuoteIds((ids) => [...ids, q.id])
-                      }}
-                      aria-label={`Remove quote from ${q.vendor?.name ?? 'vendor'}`}
-                      className="focus-ring rounded-full p-1.5 text-slate-400 transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTouched(true)
+                      setRemovedQuoteIds((ids) => [...ids, quote.id])
+                    }}
+                    aria-label={`Remove quotation from ${quote.vendor?.name ?? 'vendor'}`}
+                    className="focus-ring rounded-full p-2 text-slate-400 hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               ))}
             </div>
           )}
-
-          <div className="space-y-3">
-            {quotations.map((q, i) => {
-              const isLowest = lowestQuote !== null && allQuoteAmounts.length > 1 && Number(q.amount) === lowestQuote
-              const invalid = showErrors && step === 3 && quoteStarted(q) && (!q.vendor_id || !(Number(q.amount) > 0))
-              return (
-                <div key={i} className={clsx('rounded-[1.5rem] border p-4', invalid ? 'border-[var(--accent)]' : 'border-black/10')}>
-                  <div className="mb-3 flex items-center justify-between">
-                    <span className="flex items-center gap-2 text-sm font-semibold text-[var(--ink)]">
-                      New quote {keptQuotes.length + i + 1}
-                      {isLowest && <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 text-[11px] font-semibold">Lowest</span>}
-                    </span>
+          {quotations.map((quote, index) => {
+            const invalid = showErrors && step === 3 && quoteStarted(quote) && (!quote.vendor_id || !(Number(quote.amount) > 0))
+            const isLowest = lowestQuote !== null && quoteAmounts.length > 1 && Number(quote.amount) === lowestQuote
+            return (
+              <div key={index} className={clsx('rounded-[1.5rem] border p-4', invalid ? 'border-[var(--accent)]' : 'border-black/10')}>
+                <div className="mb-3 flex items-center justify-between">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-[var(--ink)]">
+                    Quotation {keptQuotes.length + index + 1}
+                    {isLowest && <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 text-[11px] font-semibold">Lowest</span>}
+                  </span>
+                  {quotations.length > 1 && (
                     <button
                       type="button"
-                      onClick={() => setQuotations((rows) => rows.filter((_, idx) => idx !== i))}
-                      aria-label={`Remove quote ${i + 1}`}
-                      className="focus-ring rounded-full p-1.5 text-slate-400 transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+                      onClick={() => {
+                        setTouched(true)
+                        setQuotations((rows) => rows.filter((_, i) => i !== index))
+                      }}
+                      aria-label={`Remove quotation ${index + 1}`}
+                      className="focus-ring rounded-full p-1.5 text-slate-400 hover:text-[var(--accent)]"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={15} />
                     </button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_11rem]">
-                    <select
-                      value={q.vendor_id}
-                      onChange={(e) => updateQuotation(i, { vendor_id: e.target.value })}
-                      aria-label="Vendor"
-                      className={clsx(inputClass, 'border-transparent')}
-                    >
-                      <option value="">Select vendor</option>
-                      {vendors.map((v) => (
-                        <option key={v.id} value={v.id}>{v.name}</option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      placeholder="Amount ($)"
-                      aria-label="Quoted amount"
-                      value={q.amount}
-                      onChange={(e) => updateQuotation(i, { amount: e.target.value })}
-                      className={clsx(inputClass, 'border-transparent')}
-                    />
-                  </div>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_11rem]">
-                    <input
-                      placeholder="Notes (optional)"
-                      value={q.notes}
-                      onChange={(e) => updateQuotation(i, { notes: e.target.value })}
-                      className={clsx(inputClass, 'border-transparent')}
-                    />
-                    <input
-                      type="date"
-                      aria-label="Valid until"
-                      title="Valid until"
-                      value={q.valid_until}
-                      min={format(new Date(), 'yyyy-MM-dd')}
-                      onChange={(e) => updateQuotation(i, { valid_until: e.target.value })}
-                      className={clsx(inputClass, 'border-transparent', !q.valid_until && 'text-slate-400')}
-                    />
-                  </div>
-                  <DropZone file={q.file} onFile={(file) => updateQuotation(i, { file })} />
+                  )}
                 </div>
-              )
-            })}
-          </div>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_11rem]">
+                  <select
+                    value={quote.vendor_id}
+                    onChange={(event) => updateQuotation(index, { vendor_id: event.target.value })}
+                    aria-label="Vendor"
+                    className={clsx(inputClass, 'border-transparent')}
+                  >
+                    <option value="">Select vendor</option>
+                    {vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+                  </select>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={quote.amount}
+                    onChange={(event) => updateQuotation(index, { amount: event.target.value })}
+                    placeholder="Quoted amount (ETB)"
+                    aria-label="Quoted amount"
+                    className={clsx(inputClass, 'border-transparent')}
+                  />
+                </div>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <input
+                    type="date"
+                    value={quote.valid_until}
+                    onChange={(event) => updateQuotation(index, { valid_until: event.target.value })}
+                    aria-label="Quote valid until"
+                    className={clsx(inputClass, 'border-transparent')}
+                  />
+                  <input
+                    value={quote.notes}
+                    onChange={(event) => updateQuotation(index, { notes: event.target.value })}
+                    placeholder="Notes (optional)"
+                    aria-label="Quotation notes"
+                    className={clsx(inputClass, 'border-transparent')}
+                  />
+                </div>
+                <Field label="Quotation document" optional>
+                  <DropZone file={quote.file} onFile={(file) => updateQuotation(index, { file })} />
+                </Field>
+              </div>
+            )
+          })}
           <button
             type="button"
             onClick={() => setQuotations((rows) => [...rows, { ...EMPTY_QUOTATION }])}
-            className="focus-ring flex w-full items-center justify-center gap-2 rounded-[1.5rem] border-2 border-dashed border-black/10 py-4 text-sm font-medium text-[var(--ink)] transition-colors hover:border-black/30"
+            className="focus-ring flex w-full items-center justify-center gap-2 rounded-[1.5rem] border-2 border-dashed border-black/10 py-4 text-sm font-medium text-[var(--ink)] hover:border-black/30"
           >
             <Plus size={16} />
-            {quotations.length || keptQuotes.length ? 'Add another quote' : 'Add a quote'}
+            Add another quotation
           </button>
         </>
       )}
@@ -778,11 +787,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               value={form.required_date ? format(new Date(`${form.required_date}T00:00`), 'MMM d, yyyy') : 'Not set'}
               onEdit={() => setStep(2)}
             />
-            <ReviewTile
-              label="Quotations"
-              value={quoteCount ? `${quoteCount} · lowest ${money(lowestQuote ?? 0)}` : 'None yet'}
-              onEdit={() => setStep(3)}
-            />
+            <ReviewTile label="Quotations" value={quoteCount ? `${quoteCount} · lowest ${money(lowestQuote ?? 0)}` : 'None yet'} onEdit={() => setStep(3)} />
           </div>
 
           {filledItems.length > 0 && (
@@ -811,27 +816,12 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </div>
           )}
 
-          {quoteCount === 0 ? (
-            <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--accent-soft)] p-4 text-sm text-[var(--ink)]">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[var(--accent)]">
-                <Info size={16} />
-              </span>
-              <span>
-                Finance needs at least one vendor quote.{' '}
-                <button type="button" onClick={() => setStep(3)} className="font-semibold underline underline-offset-2">
-                  Add a quote
-                </button>{' '}
-                or save this as a draft for now.
-              </span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--sun-soft)] p-4 text-sm text-[var(--ink)]">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--sun)]">
-                <ArrowRight size={16} />
-              </span>
-              Submitting sends it to Finance first, then the General Manager and Owner.
-            </div>
-          )}
+          <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--sun-soft)] p-4 text-sm text-[var(--ink)]">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--sun)]">
+              <ArrowRight size={16} />
+            </span>
+            Submitting sends the request to the assigned Project Manager, then Finance.
+          </div>
         </>
       )}
     </StepModal>
@@ -888,7 +878,7 @@ function DropZone({ file, onFile }: { file: File | null; onFile: (file: File | n
     >
       <Upload size={16} className="shrink-0" />
       <span>
-        Drop the quote file or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
+        Drop the file or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
       </span>
       <input
         type="file"

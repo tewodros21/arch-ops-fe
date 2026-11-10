@@ -8,7 +8,6 @@ import { useAuth } from '@/context/AuthContext'
 import { Avatar, Breadcrumbs, Button, StatusBadge, useConfirm } from '@/components/ui'
 import {
   approveStage,
-  completeRequest,
   EDITABLE_STATUSES,
   recordPurchase,
   rejectRequest,
@@ -20,12 +19,13 @@ import {
 } from '@/lib/workflow'
 import { ACCEPT_ATTR, attachFile, formatBytes, openAttachment, validateFile } from '@/lib/storage'
 import {
-  addQuotation,
   deletePurchaseRequest,
+  addQuotation,
   fetchActiveVendors,
   loadPurchaseRequest,
   PURCHASE_SAVED_EVENT,
   selectQuotation,
+  updateReceivedItems,
   type PurchaseUnavailable,
 } from '@/services/requests'
 import { ATTACHMENT_TYPE_LABELS, ROLE_LABELS, type AttachmentType, type PurchaseAttachment, type PurchaseRequest, type Vendor } from '@/types'
@@ -50,6 +50,7 @@ export function RequestDetail() {
   const [uploadType, setUploadType] = useState<AttachmentType>('other')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
+  const [receivedQuantities, setReceivedQuantities] = useState<Record<string, string>>({})
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [quoteFormOpen, setQuoteFormOpen] = useState(false)
   const [quoteForm, setQuoteForm] = useState(EMPTY_QUOTE)
@@ -95,7 +96,7 @@ export function RequestDetail() {
       unavailable === 'sent_back'
         ? unavailableMessage || 'The requester can edit and resubmit. It will come back to Finance when they are ready.'
         : unavailable === 'with_requester'
-          ? unavailableMessage || 'Only the requester can open it while it is a draft or waiting on quote changes.'
+          ? unavailableMessage || 'Only the requester can open it while it is a draft or waiting on changes.'
           : 'This purchase request could not be opened.'
     return (
       <div className="rounded-[1.75rem] bg-white px-6 py-16 text-center">
@@ -110,31 +111,44 @@ export function RequestDetail() {
 
   const req = request
   const role = profile?.role
+  const isShopkeeper = role === 'shopkeeper'
+  if (isShopkeeper && !['purchased', 'completed'].includes(req.status)) {
+    return (
+      <div className="rounded-[1.75rem] bg-white px-6 py-16 text-center">
+        <p className="text-2xl font-black text-[var(--ink)]">Request not available</p>
+        <p className="mx-auto mt-3 max-w-md text-sm text-slate-500">Shopkeepers can view requests once Finance has purchased the items.</p>
+        <Link to="/requests" className="mt-5 inline-block text-sm font-medium text-[var(--accent)] underline underline-offset-4">
+          Back to requests
+        </Link>
+      </div>
+    )
+  }
   const isRequester = !!profile && profile.id === req.requester_id
   const myStage = role ? ROLE_STAGE[role] : null
   const currentStage = stageForStatus(req.status)
   const myTurn = !!myStage && currentStage === myStage
+  const projectIds = req.project_ids?.length ? req.project_ids : [req.project_id]
+  const assignedToProject =
+    role !== 'project_manager' || profile?.has_all_projects || projectIds.some((projectId) => profile?.project_ids.includes(projectId))
   // The server blocks self-approval too; hide the panel instead of letting it fail
-  const canAct = myTurn && !isRequester
+  const canAct = myTurn && !isRequester && assignedToProject
   const editable = isRequester && EDITABLE_STATUSES.includes(req.status)
+  const canPurchase = role === 'finance'
+  const canSetAmount = role === 'finance'
+  const canReceive = isShopkeeper && req.status === 'purchased'
   const financeOrAdmin = role === 'finance' || role === 'admin'
-  const canPurchase = financeOrAdmin || role === 'owner'
-  const canComplete = canPurchase || isRequester
-  // Mirrors the API's quotation rules (POST /purchase-requests/{id}/quotations/)
   const canAddQuote =
-    (isRequester && ['draft', 'quote_received', 'awaiting_finance'].includes(req.status)) ||
+    (isRequester && EDITABLE_STATUSES.includes(req.status)) ||
     (financeOrAdmin && !['purchased', 'completed', 'rejected'].includes(req.status))
   const canSelectQuote = financeOrAdmin && !['purchased', 'completed', 'rejected'].includes(req.status)
-  const canSetAmount = role === 'finance' || role === 'owner'
 
   const quotes = [...(req.quotations ?? [])].sort((a, b) => Number(a.amount) - Number(b.amount))
-  const lowest = quotes.length ? Number(quotes[0].amount) : null
-  const selectedQuote = quotes.find((q) => q.is_selected)
+  const lowestQuote = quotes.length ? Number(quotes[0].amount) : null
   const items = req.items ?? []
   const itemsTotal = items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.estimated_unit_price ?? 0), 0)
-  const defaultApproved = Number(selectedQuote?.amount ?? req.approved_amount ?? req.estimated_amount)
+  const defaultApproved = Number(req.approved_amount ?? req.estimated_amount)
   const approvedInput = approvedAmount ?? String(defaultApproved)
-  const nextStep = currentStage === 'finance' ? 'the General Manager' : currentStage === 'gm' ? 'the Owner' : 'purchasing'
+  const nextStep = currentStage === 'project_manager' ? 'Finance' : 'purchasing'
 
   // Hero shows the latest known figure large, the others underneath
   const amounts = [
@@ -143,6 +157,14 @@ export function RequestDetail() {
     { label: 'Paid', value: req.actual_amount },
   ].filter((a) => a.value != null)
   const headline = amounts[amounts.length - 1]
+  const projectNames = (req.projects?.length ? req.projects : req.project ? [req.project] : []).map((project) => project.name)
+  const approvalStarted = !EDITABLE_STATUSES.includes(req.status)
+  const requesterRole = req.requester?.role
+
+  function openQuoteForm() {
+    setQuoteFormOpen(true)
+    if (vendors.length === 0) fetchActiveVendors().then(setVendors)
+  }
 
   function pickFile(setter: (f: File | null) => void) {
     return (file: File | null) => {
@@ -170,19 +192,19 @@ export function RequestDetail() {
 
   async function handleSubmit() {
     const ok = await confirm({
-      title: 'Submit for Finance review?',
+      title: 'Submit for Project Manager review?',
       body: 'You will not be able to edit it while it is being reviewed.',
       confirmLabel: 'Submit request',
       tone: 'accent',
       icon: Send,
     })
-    if (ok) await run('submit', () => submitRequest(req.id), 'Request submitted for Finance review', 'Could not submit this request')
+    if (ok) await run('submit', () => submitRequest(req.id), 'Request submitted for Project Manager review', 'Could not submit this request')
   }
 
   async function handleDelete() {
     const ok = await confirm({
       title: 'Delete this draft?',
-      body: `${req.request_number} and its items and quotes will be removed for good.`,
+      body: `${req.request_number} and its items and documents will be removed for good.`,
       confirmLabel: 'Delete draft',
       tone: 'danger',
       icon: Trash2,
@@ -239,11 +261,11 @@ export function RequestDetail() {
   async function handleReturn() {
     const note = await confirm({
       title: 'Send back for changes?',
-      body: 'The requester can edit and resubmit. Approvals start over from Finance.',
+      body: 'The requester can edit and resubmit. Approvals start over from the Project Manager.',
       confirmLabel: 'Send back',
       tone: 'ink',
       icon: CornerUpLeft,
-      input: { label: 'What needs to change?', placeholder: 'e.g. Add a second vendor quote', required: true },
+      input: { label: 'What needs to change?', placeholder: 'e.g. Update the item quantities', required: true },
     })
     if (note === null) return
     setBusy('return')
@@ -297,16 +319,6 @@ export function RequestDetail() {
     load()
   }
 
-  async function handleComplete() {
-    const ok = await confirm({
-      title: 'Mark as completed?',
-      body: 'Confirm everything was delivered. This closes the request.',
-      confirmLabel: 'Mark completed',
-      tone: 'accent',
-    })
-    if (ok) await run('complete', () => completeRequest(req.id), 'Request marked as completed, all done here', 'Could not complete this request')
-  }
-
   async function handleUploadDocument() {
     if (!profile || !uploadFile) {
       notify.warning('Choose a file before uploading a document')
@@ -328,13 +340,28 @@ export function RequestDetail() {
     if (error) notify.error(`Could not open this file: ${error}`)
   }
 
-  function openQuoteForm() {
-    setQuoteFormOpen(true)
-    if (vendors.length === 0) fetchActiveVendors().then(setVendors)
+  async function handleSaveReceived() {
+    const invalid = items.find((item) => {
+      const received = Number(receivedQuantities[item.id] ?? item.quantity_received ?? 0)
+      return !Number.isFinite(received) || received < 0 || received > Number(item.quantity)
+    })
+    if (invalid) {
+      notify.warning(`Enter a received quantity from 0 to ${invalid.quantity} for ${invalid.name}`)
+      return
+    }
+    const result = await run(
+      'receive',
+      () => updateReceivedItems(req.id, items.map((item) => ({
+        id: item.id,
+        quantity_received: Number(receivedQuantities[item.id] ?? item.quantity_received ?? 0),
+      }))),
+      'Received quantities saved',
+      'Could not save received quantities',
+    )
+    if (result) setReceivedQuantities({})
   }
 
   async function handleAddQuote() {
-    if (!profile) return
     if (!quoteForm.vendor_id || !(Number(quoteForm.amount) > 0)) {
       notify.warning('Choose a vendor and enter the quoted amount')
       return
@@ -392,10 +419,10 @@ export function RequestDetail() {
           <div className="min-w-0 flex-1">
             <h1 className="text-[clamp(1.9rem,4vw,3rem)] leading-[1.02] font-black tracking-[-0.035em] break-words text-[var(--ink)]">{req.title}</h1>
             <p className="mt-2 text-sm text-[var(--ink-soft)]">
-              {req.project?.name} · {req.department}
+              {projectNames.join(', ')}{!isShopkeeper && req.department ? ` · ${req.department}` : ''}
             </p>
           </div>
-          <div className="sm:text-right">
+          {!isShopkeeper && <div className="sm:text-right">
             <p className="text-xs font-medium tracking-wide text-slate-500 uppercase">{headline.label}</p>
             <p className="text-[clamp(2.2rem,5vw,3.5rem)] leading-none font-black tracking-tight text-[var(--ink)]">{formatCurrency(headline.value)}</p>
             {amounts.length > 1 && (
@@ -406,10 +433,10 @@ export function RequestDetail() {
                   .join(' · ')}
               </p>
             )}
-          </div>
+          </div>}
         </div>
 
-        <div className="mt-6 grid grid-cols-2 gap-4 border-t border-black/[0.06] pt-6 md:grid-cols-4">
+        {!isShopkeeper && <div className="mt-6 grid grid-cols-2 gap-4 border-t border-black/[0.06] pt-6 md:grid-cols-4">
           <Meta label="Requester">
             <span className="flex items-center gap-2">
               {req.requester && <Avatar initials={req.requester.avatar_initials} size={26} />}
@@ -419,7 +446,7 @@ export function RequestDetail() {
           <Meta label="Role">{req.requester ? ROLE_LABELS[req.requester.role] : '—'}</Meta>
           <Meta label="Needed by">{req.required_date ? format(new Date(`${req.required_date}T00:00`), 'MMM d, yyyy') : 'Not set'}</Meta>
           <Meta label={req.submitted_at ? 'Submitted' : 'Created'}>{format(new Date(req.submitted_at ?? req.created_at), 'MMM d, yyyy')}</Meta>
-        </div>
+        </div>}
 
         {req.return_note && EDITABLE_STATUSES.includes(req.status) && (
           <div className="mt-5 flex items-start gap-3 rounded-2xl bg-[var(--sun-soft)] p-4 text-sm text-[var(--ink)]">
@@ -440,10 +467,10 @@ export function RequestDetail() {
         )}
       </section>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className={`grid grid-cols-1 gap-4 ${isShopkeeper ? '' : 'lg:grid-cols-[minmax(0,1fr)_22rem]'}`}>
         {/* ── Main column ── */}
         <div className="order-2 min-w-0 space-y-4 lg:order-1">
-          {(req.description || req.justification) && (
+          {!isShopkeeper && (req.description || req.justification) && (
             <section className="grid grid-cols-1 gap-6 rounded-[1.75rem] bg-white p-6 sm:grid-cols-2 sm:p-8">
               <div>
                 <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Description</p>
@@ -460,6 +487,50 @@ export function RequestDetail() {
             <SectionTitle title="Items" count={items.length} />
             {items.length === 0 ? (
               <p className="text-sm text-slate-500">No line items listed.</p>
+            ) : isShopkeeper ? (
+              <>
+                <ul className="space-y-2">
+                  {items.map((item) => {
+                    const received = Number(receivedQuantities[item.id] ?? item.quantity_received ?? 0)
+                    return (
+                      <li key={item.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[var(--ink)]">{item.name}</p>
+                          {canReceive && (
+                            <p className="text-xs text-slate-500">
+                              Received {received.toLocaleString()} of {Number(item.quantity).toLocaleString()} {item.unit}
+                            </p>
+                          )}
+                        </div>
+                        {canReceive ? (
+                          <label className="flex items-center gap-2 text-xs text-slate-500">
+                            <span className="sr-only">Received quantity for {item.name}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max={item.quantity}
+                              step="any"
+                              value={receivedQuantities[item.id] ?? String(item.quantity_received ?? 0)}
+                              onChange={(event) => setReceivedQuantities((current) => ({ ...current, [item.id]: event.target.value }))}
+                              className="field w-24 !py-2 text-right"
+                            />
+                            {item.unit}
+                          </label>
+                        ) : (
+                          <span className="text-sm font-bold text-[var(--ink)]">
+                            {received.toLocaleString()} / {Number(item.quantity).toLocaleString()} {item.unit}
+                          </span>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+                {canReceive && (
+                  <Button onClick={handleSaveReceived} loading={busy === 'receive'} className="mt-4 w-full">
+                    Save received quantities
+                  </Button>
+                )}
+              </>
             ) : (
               <>
                 <div className="hidden grid-cols-[minmax(0,1fr)_6rem_7rem_7rem] gap-3 px-4 pb-2 text-xs font-medium tracking-wide text-slate-500 uppercase sm:grid">
@@ -506,13 +577,12 @@ export function RequestDetail() {
             )}
           </section>
 
-          <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
+          {!isShopkeeper && <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
             <SectionTitle
               title="Vendor quotations"
               count={quotes.length}
               action={
-                canAddQuote &&
-                !quoteFormOpen && (
+                canAddQuote && !quoteFormOpen && (
                   <Button variant="outline" onClick={openQuoteForm} className="h-9 px-4">
                     <Plus size={15} />
                     Add quote
@@ -524,46 +594,38 @@ export function RequestDetail() {
               <p className="text-sm text-slate-500">No quotations attached.</p>
             ) : (
               <div className="space-y-2">
-                {quotes.map((q) => {
-                  const diff = lowest !== null ? Number(q.amount) - lowest : 0
-                  const expired = !!q.valid_until && new Date(`${q.valid_until}T23:59`) < new Date()
+                {quotes.map((quote) => {
+                  const amount = Number(quote.amount)
+                  const diff = lowestQuote !== null ? amount - lowestQuote : 0
+                  const expired = !!quote.valid_until && new Date(`${quote.valid_until}T23:59`) < new Date()
                   return (
                     <div
-                      key={q.id}
-                      className={clsx(
-                        'flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3.5',
-                        q.is_selected && 'ring-2 ring-[var(--ink)]',
-                      )}
+                      key={quote.id}
+                      className={clsx('flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3.5', quote.is_selected && 'ring-2 ring-[var(--ink)]')}
                     >
                       <div className="min-w-0 flex-1">
                         <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[var(--ink)]">
-                          {q.vendor?.name}
+                          {quote.vendor?.name ?? 'Vendor'}
                           {quotes.length > 1 && diff === 0 && <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 text-[11px]">Lowest</span>}
-                          {q.is_selected && <span className="rounded-full bg-[var(--ink)] px-2 py-0.5 text-[11px] text-white">Selected</span>}
+                          {quote.is_selected && <span className="rounded-full bg-[var(--ink)] px-2 py-0.5 text-[11px] text-white">Selected</span>}
                         </p>
                         <p className="truncate text-xs text-slate-500">
-                          {q.valid_until ? (
-                            <span className={clsx(expired && 'font-semibold text-[var(--accent)]')}>
-                              {expired ? 'Expired' : 'Valid until'} {format(new Date(`${q.valid_until}T00:00`), 'MMM d, yyyy')}
-                            </span>
-                          ) : (
-                            'No expiry set'
-                          )}
-                          {q.notes && ` · ${q.notes}`}
+                          {quote.valid_until
+                            ? <span className={clsx(expired && 'font-semibold text-[var(--accent)]')}>{expired ? 'Expired' : 'Valid until'} {format(new Date(`${quote.valid_until}T00:00`), 'MMM d, yyyy')}</span>
+                            : 'No expiry set'}
+                          {quote.notes && ` · ${quote.notes}`}
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
-                        {canSelectQuote && !q.is_selected && (
-                          <Button variant="ghost" onClick={() => handleSelectQuote(q.id)} loading={busy === `select-${q.id}`} className="h-9 px-3 text-xs">
+                        {canSelectQuote && !quote.is_selected && (
+                          <Button variant="ghost" onClick={() => handleSelectQuote(quote.id)} loading={busy === `select-${quote.id}`} className="h-9 px-3 text-xs">
                             Select
                           </Button>
                         )}
                         <div className="text-right">
-                          <p className="text-lg leading-tight font-bold text-[var(--ink)]">{formatCurrency(q.amount)}</p>
+                          <p className="text-lg leading-tight font-bold text-[var(--ink)]">{formatCurrency(amount)}</p>
                           {quotes.length > 1 && diff > 0 && (
-                            <p className="text-[11px] text-slate-500">
-                              +{formatCurrency(diff)} ({Math.round((diff / (lowest || 1)) * 100)}%)
-                            </p>
+                            <p className="text-[11px] text-slate-500">+{formatCurrency(diff)} ({Math.round((diff / (lowestQuote || 1)) * 100)}%)</p>
                           )}
                         </div>
                       </div>
@@ -572,29 +634,25 @@ export function RequestDetail() {
                 })}
               </div>
             )}
-
             {quoteFormOpen && (
               <div className="mt-4 space-y-2 border-t border-black/[0.06] pt-4">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_10rem]">
                   <select
                     value={quoteForm.vendor_id}
-                    onChange={(e) => setQuoteForm((f) => ({ ...f, vendor_id: e.target.value }))}
+                    onChange={(event) => setQuoteForm((form) => ({ ...form, vendor_id: event.target.value }))}
                     aria-label="Vendor"
                     className="field h-11 !py-0"
                   >
                     <option value="">{vendors.length ? 'Select vendor' : 'Loading vendors…'}</option>
-                    {vendors.map((v) => (
-                      <option key={v.id} value={v.id}>{v.name}</option>
-                    ))}
+                    {vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
                   </select>
                   <input
                     type="number"
-                    inputMode="decimal"
                     min="0"
                     step="0.01"
                     value={quoteForm.amount}
-                    onChange={(e) => setQuoteForm((f) => ({ ...f, amount: e.target.value }))}
-                    placeholder="Amount ($)"
+                    onChange={(event) => setQuoteForm((form) => ({ ...form, amount: event.target.value }))}
+                    placeholder="Quoted amount (ETB)"
                     aria-label="Quoted amount"
                     className="field h-11 !py-0"
                   />
@@ -602,25 +660,22 @@ export function RequestDetail() {
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_10rem]">
                   <input
                     value={quoteForm.notes}
-                    onChange={(e) => setQuoteForm((f) => ({ ...f, notes: e.target.value }))}
+                    onChange={(event) => setQuoteForm((form) => ({ ...form, notes: event.target.value }))}
                     placeholder="Notes (optional)"
                     className="field h-11 !py-0"
                   />
                   <input
                     type="date"
                     value={quoteForm.valid_until}
-                    onChange={(e) => setQuoteForm((f) => ({ ...f, valid_until: e.target.value }))}
+                    onChange={(event) => setQuoteForm((form) => ({ ...form, valid_until: event.target.value }))}
                     aria-label="Valid until"
-                    title="Valid until"
                     className="field h-11 !py-0"
                   />
                 </div>
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <FilePick file={quoteFile} onFile={pickFile(setQuoteFile)} label="Attach quote file (optional)" />
                   <div className="flex gap-2">
-                    <Button onClick={handleAddQuote} loading={quoteBusy} className="flex-1 sm:flex-none">
-                      Save quote
-                    </Button>
+                    <Button onClick={handleAddQuote} loading={quoteBusy} className="flex-1 sm:flex-none">Save quote</Button>
                     <Button
                       variant="ghost"
                       onClick={() => {
@@ -635,9 +690,9 @@ export function RequestDetail() {
                 </div>
               </div>
             )}
-          </section>
+          </section>}
 
-          <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
+          {!isShopkeeper && <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
             <SectionTitle title="Documents" count={req.attachments?.length ?? 0} />
             <div className="space-y-2">
               {req.attachments && req.attachments.length > 0 ? (
@@ -678,25 +733,25 @@ export function RequestDetail() {
                 Upload
               </Button>
             </div>
-          </section>
+          </section>}
         </div>
 
         {/* ── Side column: actions first so approvers see them immediately ── */}
-        <div className="order-1 min-w-0 space-y-4 lg:order-2">
+        {!isShopkeeper && <div className="order-1 min-w-0 space-y-4 lg:order-2">
           {editable && (
             <section className="panel-dark relative overflow-hidden rounded-[1.75rem] p-6">
               <div className="relative">
                 <span className="rounded-full bg-[var(--sun)] px-3 py-1 text-xs font-semibold text-[var(--ink)]">
-                  {req.status === 'draft' ? 'Draft' : 'Quote received'}
+                  {req.status === 'draft' ? 'Draft' : 'Changes requested'}
                 </span>
                 <p className="mt-3 text-2xl leading-tight font-black text-white">Ready to submit?</p>
                 <p className="mt-1 text-sm text-white/60">
-                  {quotes.length === 0 ? 'Add at least one vendor quote before sending it to Finance.' : 'Finance reviews it first, then the GM and Owner.'}
+                  Send it to the assigned Project Manager for review, then Finance.
                 </p>
                 <div className="mt-5 flex flex-col gap-2">
-                  <Button variant="accent" onClick={handleSubmit} loading={busy === 'submit'} disabled={quotes.length === 0} className="h-12">
+                  <Button variant="accent" onClick={handleSubmit} loading={busy === 'submit'} className="h-12">
                     <Send size={17} />
-                    Submit for Finance review
+                    Submit for Project Manager review
                   </Button>
                   <Link
                     to={{ search: `?edit=${req.id}` }}
@@ -721,7 +776,7 @@ export function RequestDetail() {
                 <p className="mt-3 text-2xl leading-tight font-black text-white">Review this request</p>
                 {canSetAmount && (
                   <label className="mt-4 block">
-                    <span className="text-xs text-white/60">Approved amount{selectedQuote ? ' · from the selected quote' : ''}</span>
+                    <span className="text-xs text-white/60">Approved amount</span>
                     <span className="mt-1.5 flex items-center gap-1 rounded-2xl bg-white/10 px-4 py-2.5 focus-within:ring-2 focus-within:ring-[var(--sun)]">
                       <span className="text-lg font-bold text-white/50">$</span>
                       <input
@@ -783,26 +838,17 @@ export function RequestDetail() {
             </section>
           )}
 
-          {req.status === 'purchased' && canComplete && (
-            <section className="rounded-[1.75rem] bg-white p-6">
-              <SectionTitle title="Close it out" />
-              <p className="mb-4 text-sm text-[var(--ink-soft)]">Everything delivered? Mark the request complete.</p>
-              <Button onClick={handleComplete} loading={busy === 'complete'} className="w-full">
-                Mark as completed
-              </Button>
-            </section>
-          )}
-
           <section className="rounded-[1.75rem] bg-white p-6">
             <SectionTitle title="Approval trail" />
             <ol className="space-y-5">
-              {(['finance', 'gm', 'owner'] as const).map((stage, i) => {
-                const approval = req.approvals?.find((a) => a.stage === stage)
-                const decision = approval?.decision ?? 'pending'
+              {(['project_manager', 'finance'] as const).map((stage, i) => {
+                const approval = req.approvals?.find((a) => a.stage === stage || (stage === 'project_manager' && a.stage === 'gm'))
+                const autoApproved = approvalStarted && requesterRole === stage
+                const decision = autoApproved ? 'approved' : approval?.decision ?? 'pending'
                 const current = currentStage === stage
                 return (
                   <li key={stage} className="relative flex gap-3">
-                    {i < 2 && <span className="absolute top-10 bottom-[-1.25rem] left-[1.1rem] w-px bg-black/10" />}
+                    {i < 1 && <span className="absolute top-10 bottom-[-1.25rem] left-[1.1rem] w-px bg-black/10" />}
                     <span
                       className={clsx(
                         'relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
@@ -830,9 +876,11 @@ export function RequestDetail() {
                             : EDITABLE_STATUSES.includes(req.status)
                               ? 'Starts after submission'
                               : 'Not reached yet'
-                          : `${decision === 'approved' ? 'Approved' : 'Rejected'}${approval?.reviewer ? ` by ${approval.reviewer.full_name}` : ''}${
-                              approval?.decided_at ? ` · ${format(new Date(approval.decided_at), 'MMM d')}` : ''
-                            }`}
+                          : autoApproved
+                            ? 'Auto-approved because the requester is the approver'
+                            : `${decision === 'approved' ? 'Approved' : 'Rejected'}${approval?.reviewer ? ` by ${approval.reviewer.full_name}` : ''}${
+                                approval?.decided_at ? ` · ${format(new Date(approval.decided_at), 'MMM d')}` : ''
+                              }`}
                       </p>
                       {approval?.comments && <p className="mt-1 text-xs text-[var(--ink-soft)] italic">“{approval.comments}”</p>}
                     </div>
@@ -842,6 +890,7 @@ export function RequestDetail() {
             </ol>
           </section>
         </div>
+        }
       </div>
     </div>
   )

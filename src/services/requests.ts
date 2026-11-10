@@ -1,8 +1,8 @@
-import { backend, type PurchaseCountFilter, type QuotationInput, type RequestInput, type ItemInput } from '@/api'
+import { backend, type ItemInput, type ItemReceiptInput, type PurchaseCountFilter, type QuotationInput, type RequestInput } from '@/api'
 import { attachFile } from '@/lib/storage'
 import type { Department, PurchaseRequest, Vendor } from '@/types'
 
-export type { ItemInput, RequestInput } from '@/api'
+export type { ItemInput, QuotationInput, RequestInput } from '@/api'
 
 // Fired after a purchase request is created or edited so open pages can reload
 export const PURCHASE_SAVED_EVENT = 'purchase-request-saved'
@@ -17,7 +17,7 @@ export async function fetchPurchaseRequests(): Promise<PurchaseRequest[]> {
   return data ?? []
 }
 
-/** Expected when Finance/GM opens a draft or a request they just sent back */
+/** Expected when Finance or a Project Manager opens a draft or a request they just sent back */
 const EXPECTED_UNAVAILABLE = new Set(['not_found', 'sent_back', 'with_requester'])
 
 export type PurchaseUnavailable = 'sent_back' | 'with_requester' | 'missing'
@@ -51,7 +51,8 @@ export function fetchProjects() {
 }
 
 export async function fetchActiveVendors(): Promise<Vendor[]> {
-  const { data } = await backend.vendors.list({ activeOnly: true })
+  const { data, error } = await backend.vendors.list({ activeOnly: true })
+  if (error) console.error('Error fetching vendors:', error)
   return data ?? []
 }
 
@@ -63,10 +64,6 @@ export async function fetchDepartments(): Promise<Department[]> {
 
 // ── Create / edit ────────────────────────────────────────────────────────────
 
-export interface QuoteInput extends QuotationInput {
-  file: File | null
-}
-
 type Result = { error: string | null }
 
 /** Always a draft for the signed-in user; request_number comes from the server */
@@ -75,7 +72,7 @@ export async function createPurchaseRequest(input: RequestInput): Promise<{ id: 
   return { id: data?.id ?? null, error: error?.message ?? null }
 }
 
-/** Only the requester's own draft / quote_received requests can be edited; status is never touched here */
+/** Only the requester's own draft or legacy quote_received requests can be edited; status is never touched here */
 export async function updatePurchaseRequest(id: string, input: RequestInput): Promise<Result> {
   const { error } = await backend.purchases.update(id, input)
   return { error: error?.message ?? null }
@@ -86,7 +83,8 @@ export async function replaceItems(requestId: string, items: ItemInput[]): Promi
   return { error: error?.message ?? null }
 }
 
-/** Adding a quote to a draft moves it to Quote Received (server side) */
+export type QuoteInput = QuotationInput & { file: File | null }
+
 export async function addQuotation(requestId: string, quote: QuoteInput): Promise<Result & { fileError?: string | null }> {
   const { file, ...fields } = quote
   const { error } = await backend.purchases.addQuotation(requestId, fields)
@@ -106,13 +104,17 @@ export async function deleteQuotations(ids: string[]): Promise<Result> {
   return { error: null }
 }
 
-/** Only one quote per request is selected at a time */
 export async function selectQuotation(requestId: string, quoteId: string): Promise<Result> {
   const { error } = await backend.purchases.selectQuotation(requestId, quoteId)
   return { error: error?.message ?? null }
 }
 
-/** Requesters can delete their own drafts; items, quotes and attachments go with them */
+export async function updateReceivedItems(requestId: string, items: ItemReceiptInput[]): Promise<Result> {
+  const { error } = await backend.purchases.updateReceivedItems(requestId, items)
+  return { error: error?.message ?? null }
+}
+
+/** Requesters can delete their own drafts; items and attachments go with them */
 export async function deletePurchaseRequest(id: string): Promise<Result> {
   const { error } = await backend.purchases.remove(id)
   return { error: error?.message ?? null }

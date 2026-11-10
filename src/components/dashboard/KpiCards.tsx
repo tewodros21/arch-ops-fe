@@ -3,14 +3,15 @@ import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { isSameMonth } from 'date-fns'
 import { AlarmClock, BadgeCheck, HardHat, Hourglass, Inbox, ShoppingBag, type LucideIcon } from 'lucide-react'
-import { STATUS_LABELS, type LaborRequest, type Profile, type PurchaseRequest, type RequestStatus } from '@/types'
+import { STATUS_LABELS, type LaborRequest, type Profile, type PurchaseRequest, type Role, type RequestStatus } from '@/types'
 import { approvedValue, compactMoney, DONE, IN_REVIEW, isOverdue, isStuck, money, PAID, STUCK_HOURS } from './metrics'
 
-const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
-  employee: null,
+const AWAITING_BY_ROLE: Record<Role, RequestStatus | null> = {
+  site_engineer: null,
+  project_manager: 'awaiting_gm',
+  ceo: null,
   finance: 'awaiting_finance',
-  general_manager: 'awaiting_gm',
-  owner: 'awaiting_owner',
+  shopkeeper: null,
   admin: null,
 }
 
@@ -88,7 +89,7 @@ export function KpiCards({
   const approved = scoped.filter((r) => DONE.includes(r.status))
   const approvedTotal = approved.reduce((s, r) => s + approvedValue(r), 0)
 
-  const myLabor = profile.role === 'employee' ? labor.filter((l) => l.requested_by === profile.id) : labor
+  const myLabor = profile.role === 'site_engineer' ? labor.filter((l) => l.requested_by === profile.id) : labor
   const activeLabor = myLabor.filter((l) => !['completed', 'cancelled'].includes(l.status))
   const workers = activeLabor.reduce((s, l) => s + Number(l.workers_required ?? 0), 0)
 

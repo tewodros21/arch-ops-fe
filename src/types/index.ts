@@ -1,4 +1,10 @@
-export type Role = 'employee' | 'finance' | 'general_manager' | 'owner' | 'admin'
+export type Role =
+  | 'admin'
+  | 'ceo'
+  | 'project_manager'
+  | 'site_engineer'
+  | 'finance'
+  | 'shopkeeper'
 
 export type RequestStatus =
   | 'draft'
@@ -11,7 +17,7 @@ export type RequestStatus =
   | 'purchased'
   | 'completed'
 
-export type ApprovalStage = 'finance' | 'gm' | 'owner'
+export type ApprovalStage = 'project_manager' | 'finance' | 'gm' | 'owner'
 export type ApprovalDecision = 'pending' | 'approved' | 'rejected'
 
 export interface Profile {
@@ -22,6 +28,9 @@ export interface Profile {
   department: string | null
   is_active: boolean
   avatar_initials: string
+  must_change_password?: boolean
+  has_all_projects: boolean
+  project_ids: string[]
 }
 
 export interface Project {
@@ -33,7 +42,7 @@ export interface Project {
   budget?: number | null
   is_active: boolean
   /** Approved or paid spend across the project's requests (filled on admin lists) */
-  spent_amount?: number
+  spent_amount: number
 }
 
 export interface Department {
@@ -41,8 +50,18 @@ export interface Department {
   name: string
   is_active: boolean
   created_at?: string
-  /** People currently in this department (filled on admin lists) */
-  member_count?: number
+  /** Site employees currently in this department (filled on admin lists) */
+  member_count: number
+}
+
+export interface SiteEmployee {
+  id: string
+  full_name: string
+  department: string
+  is_active: boolean
+  notes: string
+  created_at: string
+  updated_at: string
 }
 
 export interface Vendor {
@@ -65,6 +84,7 @@ export interface PurchaseItem {
   quantity: number
   unit: string
   estimated_unit_price: number | null
+  quantity_received?: number
 }
 
 export interface VendorQuotation {
@@ -90,7 +110,7 @@ export interface Approval {
   decided_at: string | null
 }
 
-export type AttachmentType = 'quotation' | 'invoice' | 'receipt' | 'delivery' | 'photo' | 'other'
+export type AttachmentType = 'proforma' | 'quotation' | 'invoice' | 'receipt' | 'delivery' | 'photo' | 'other'
 
 export interface PurchaseAttachment {
   id: string
@@ -122,6 +142,8 @@ export interface PurchaseRequest {
   actual_amount: number | null
   justification: string
   status: RequestStatus
+  project_ids?: string[]
+  projects?: Project[]
   rejection_reason: string | null
   /** Set when an approver sends the request back for changes */
   return_note?: string | null

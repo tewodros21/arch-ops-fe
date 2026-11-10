@@ -12,10 +12,9 @@ import { formatCurrency } from '@/utils'
 const FILTERS: { key: string; label: string; statuses: RequestStatus[] | null }[] = [
   { key: 'all', label: 'All', statuses: null },
   { key: 'drafts', label: 'Drafts', statuses: ['draft', 'quote_received'] },
-  { key: 'review', label: 'In review', statuses: ['awaiting_finance', 'awaiting_gm', 'awaiting_owner'] },
+  { key: 'review', label: 'In review', statuses: ['awaiting_finance', 'awaiting_gm'] },
   { key: 'awaiting_finance', label: 'Finance', statuses: ['awaiting_finance'] },
-  { key: 'awaiting_gm', label: 'GM', statuses: ['awaiting_gm'] },
-  { key: 'awaiting_owner', label: 'Owner', statuses: ['awaiting_owner'] },
+  { key: 'awaiting_gm', label: 'Project Manager', statuses: ['awaiting_gm'] },
   { key: 'approved', label: 'Approved', statuses: ['approved'] },
   { key: 'done', label: 'Purchased & done', statuses: ['purchased', 'completed'] },
   { key: 'rejected', label: 'Rejected', statuses: ['rejected'] },
@@ -57,13 +56,17 @@ export function RequestList() {
   }, [])
 
   // Employees see only their own requests; drafts stay private to their requester (and admins)
+  const isShopkeeper = profile?.role === 'shopkeeper'
+  const shopkeeperFilters = FILTERS.filter((filter) => ['all', 'done'].includes(filter.key))
+  const filters = isShopkeeper ? shopkeeperFilters : FILTERS
   const scoped = requests.filter((r) => {
+    if (isShopkeeper) return ['purchased', 'completed'].includes(r.status)
     const mine = r.requester_id === profile?.id
-    if (profile?.role === 'employee') return mine
+    if (profile?.role === 'site_engineer') return mine
     if (EDITABLE_STATUSES.includes(r.status)) return mine || profile?.role === 'admin'
     return true
   })
-  const filter = FILTERS.find((f) => f.key === filterKey) ?? FILTERS[0]
+  const filter = filters.find((f) => f.key === filterKey) ?? filters[0]
   const q = search.toLowerCase()
   const filtered = scoped.filter(
     (r) =>
@@ -78,7 +81,9 @@ export function RequestList() {
       <PageHeader
         title="Purchase requests"
         count={filtered.length}
-        subtitle={`${formatCurrency(Math.round(total))} estimated across ${filtered.length} request${filtered.length === 1 ? '' : 's'}`}
+        subtitle={isShopkeeper
+          ? `${filtered.filter((request) => request.status === 'purchased').length} in progress · ${filtered.filter((request) => request.status === 'completed').length} delivered`
+          : `${formatCurrency(Math.round(total))} estimated across ${filtered.length} request${filtered.length === 1 ? '' : 's'}`}
       />
 
       <div className="flex flex-col gap-3">
@@ -94,7 +99,7 @@ export function RequestList() {
           </button>
         )}
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
-          {FILTERS.map((f) => (
+          {filters.map((f) => (
             <button key={f.key} className="chip focus-ring" aria-pressed={f.key === filter.key} onClick={() => setParam('status', f.key === 'all' ? null : f.key)}>
               {f.label}
               <span className="text-xs opacity-60">{countFor(f)}</span>
@@ -104,11 +109,11 @@ export function RequestList() {
       </div>
 
       <section className="overflow-hidden rounded-[1.75rem] bg-white">
-        <div className="hidden grid-cols-[minmax(0,2.2fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_7rem_8.5rem_1.5rem] gap-4 border-b border-black/[0.06] px-6 py-3.5 text-xs font-medium tracking-wide text-slate-500 uppercase lg:grid">
+        <div className={`hidden gap-4 border-b border-black/[0.06] px-6 py-3.5 text-xs font-medium tracking-wide text-slate-500 uppercase lg:grid ${isShopkeeper ? 'grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_8.5rem_1.5rem]' : 'grid-cols-[minmax(0,2.2fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_7rem_8.5rem_1.5rem]'}`}>
           <span>Request</span>
           <span>Project</span>
-          <span>Requester</span>
-          <span className="text-right">Amount</span>
+          {!isShopkeeper && <span>Requester</span>}
+          {!isShopkeeper && <span className="text-right">Amount</span>}
           <span>Status</span>
           <span />
         </div>
@@ -131,7 +136,7 @@ export function RequestList() {
               <li key={r.id}>
                 <Link
                   to={`/requests/${r.id}`}
-                  className="focus-ring group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 py-4 transition-colors hover:bg-[var(--canvas)]/60 sm:px-6 lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_7rem_8.5rem_1.5rem]"
+                  className={`focus-ring group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-5 py-4 transition-colors hover:bg-[var(--canvas)]/60 sm:px-6 lg:grid ${isShopkeeper ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_8.5rem_1.5rem]' : 'lg:grid-cols-[minmax(0,2.2fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_7rem_8.5rem_1.5rem]'}`}
                 >
                   <div className="min-w-0">
                     <p className="truncate font-semibold text-[var(--ink)]">{r.title}</p>
@@ -140,12 +145,12 @@ export function RequestList() {
                       {due && <span className={due.late ? 'font-semibold text-[var(--accent)]' : ''}>· {due.text}</span>}
                     </p>
                   </div>
-                  <p className="order-last col-span-2 truncate text-sm text-[var(--ink-soft)] lg:order-none lg:col-span-1">{r.project?.name}</p>
-                  <div className="hidden min-w-0 items-center gap-2.5 lg:flex">
+                  <p className="order-last col-span-2 truncate text-sm text-[var(--ink-soft)] lg:order-none lg:col-span-1">{(r.projects?.length ? r.projects.map((project) => project.name) : [r.project?.name]).filter(Boolean).join(', ')}</p>
+                  {!isShopkeeper && <div className="hidden min-w-0 items-center gap-2.5 lg:flex">
                     {r.requester && <Avatar initials={r.requester.avatar_initials} index={r.requester.full_name.length} size={28} />}
                     <span className="truncate text-sm text-[var(--ink-soft)]">{r.requester?.full_name}</span>
-                  </div>
-                  <p className="text-right text-base font-bold text-[var(--ink)]">{formatCurrency(Number(r.estimated_amount))}</p>
+                  </div>}
+                  {!isShopkeeper && <p className="text-right text-base font-bold text-[var(--ink)]">{formatCurrency(Number(r.estimated_amount))}</p>}
                   <div className="hidden lg:block">
                     <StatusBadge status={r.status} />
                   </div>

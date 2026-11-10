@@ -9,10 +9,10 @@ import { AssetSlot } from '@/components/ui'
 const DEMO_PASSWORD = 'Demo!2026'
 
 const ROLES = [
-  { label: 'Employee', email: 'employee@demo.ethix.io', initials: 'EM' },
+  { label: 'Site Engineer', email: 'se@demo.ethix.io', initials: 'SE' },
   { label: 'Finance', email: 'finance@demo.ethix.io', initials: 'FI' },
-  { label: 'General Manager', email: 'gm@demo.ethix.io', initials: 'GM' },
-  { label: 'Owner', email: 'owner@demo.ethix.io', initials: 'OW' },
+  { label: 'Project Manager', email: 'pm@demo.ethix.io', initials: 'PM' },
+  { label: 'CEO', email: 'ceo@demo.ethix.io', initials: 'CE' },
   { label: 'Admin', email: 'admin@demo.ethix.io', initials: 'AD' },
 ]
 
@@ -159,7 +159,7 @@ export function Login() {
             <AssetSlot src="/assets/3d/login.png" label="Login 3D asset" dark className="h-full max-h-[28rem] w-full" />
           </div>
           <p className="relative flex items-center gap-2 text-sm text-white/60">
-            Requests <ArrowRight size={14} /> Finance <ArrowRight size={14} /> GM <ArrowRight size={14} /> Owner
+            Request <ArrowRight size={14} /> Project Manager <ArrowRight size={14} /> Finance <ArrowRight size={14} /> Purchase <ArrowRight size={14} /> Delivery
           </p>
         </aside>
       </main>

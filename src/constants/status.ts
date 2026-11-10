@@ -1,23 +1,24 @@
 import type { Role, RequestStatus, AttachmentType, LaborStatus } from '@/types'
 
 export const ROLE_LABELS: Record<Role, string> = {
-  employee: 'Employee',
+  admin: 'Admin',
+  ceo: 'CEO',
+  project_manager: 'Project Manager',
+  site_engineer: 'Site Engineer',
   finance: 'Finance',
-  general_manager: 'General Manager',
-  owner: 'Owner',
-  admin: 'Administrator',
+  shopkeeper: 'Shopkeeper',
 }
 
 export const STATUS_LABELS: Record<RequestStatus, string> = {
   draft: 'Draft',
   quote_received: 'Quote Received',
   awaiting_finance: 'Awaiting Finance',
-  awaiting_gm: 'Awaiting GM',
-  awaiting_owner: 'Awaiting Owner',
+  awaiting_gm: 'Awaiting Project Manager',
+  awaiting_owner: 'Awaiting CEO',
   approved: 'Approved',
   rejected: 'Rejected',
-  purchased: 'Purchased',
-  completed: 'Completed',
+  purchased: 'In progress',
+  completed: 'Delivered',
 }
 
 export const STATUS_COLORS: Record<RequestStatus, string> = {
@@ -33,6 +34,7 @@ export const STATUS_COLORS: Record<RequestStatus, string> = {
 }
 
 export const ATTACHMENT_TYPE_LABELS: Record<AttachmentType, string> = {
+  proforma: 'Proforma',
   quotation: 'Quotation',
   invoice: 'Invoice',
   receipt: 'Receipt',
