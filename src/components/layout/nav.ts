@@ -28,7 +28,9 @@ export function navFor(role: Role) {
 
 // The create button follows the page; restricted actions also respect the signed-in role.
 export function createActionFor(pathname: string, role: Role) {
-  if (pathname.startsWith('/labor')) return { search: NEW_LABOR_SEARCH, label: 'Request labor', aria: 'New labor request', icon: HardHat }
+  if (pathname.startsWith('/labor')) {
+    return { search: NEW_LABOR_SEARCH, label: 'Request labor', aria: 'New labor request', icon: HardHat }
+  }
   if (pathname === '/admin/projects' && (role === 'admin' || role === 'ceo')) {
     return { search: NEW_PROJECT_SEARCH, label: 'Add project', aria: 'Add project', icon: FolderKanban }
   }
@@ -43,6 +45,9 @@ export function createActionFor(pathname: string, role: Role) {
   }
   if (pathname.startsWith('/vendors') && (role === 'admin' || role === 'finance')) {
     return { search: NEW_VENDOR_SEARCH, label: 'Add vendor', aria: 'Add vendor', icon: Store }
+  }
+  if (pathname === '/admin/departments' && role === 'admin') {
+    return { search: NEW_DEPARTMENT_SEARCH, label: 'Add department', aria: 'Add department', icon: Building2 }
   }
   if (['site_engineer', 'admin', 'ceo', 'project_manager', 'finance'].includes(role)) {
     return { search: NEW_REQUEST_SEARCH, label: 'New request', aria: 'New purchase request', icon: Plus }

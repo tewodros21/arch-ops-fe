@@ -6,9 +6,9 @@ import { Field, FormModal } from '@/components/admin/FormModal'
 import { NEW_USER_SEARCH, USER_CREATED_EVENT } from '@/constants'
 import { useAuth } from '@/context/AuthContext'
 import { notify } from '@/lib/notify'
-import { fetchProjects, fetchTeam, updateProfile } from '@/services'
+import { fetchAllDepartments, fetchProjects, fetchTeam, updateProfile } from '@/services'
 import { getInitials } from '@/utils'
-import { ROLE_LABELS, type Profile, type Role } from '@/types'
+import { ROLE_LABELS, type Department, type Profile, type Role } from '@/types'
 import { EmptyCard, ListCard } from './shared'
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
@@ -195,6 +195,8 @@ function EditPersonModal({ person, onClose, onSaved }: { person: Profile; onClos
   const confirm = useConfirm()
   const [name, setName] = useState(person.full_name)
   const [role, setRole] = useState<Role>(person.role)
+  const [department, setDepartment] = useState(person.department ?? '')
+  const [departments, setDepartments] = useState<Department[]>([])
   const [projects, setProjects] = useState<{ id: string; name: string; code: string }[]>([])
   const [projectIds, setProjectIds] = useState<string[]>(person.project_ids ?? [])
   const [allProjects, setAllProjects] = useState(Boolean(person.has_all_projects))
@@ -212,6 +214,17 @@ function EditPersonModal({ person, onClose, onSaved }: { person: Profile; onClos
         return
       }
       setProjects((data ?? []).map((p) => ({ id: p.id, name: p.name, code: p.code })))
+    })
+  }, [])
+
+  useEffect(() => {
+    fetchAllDepartments({ activeOnly: true }).then(({ data, error }) => {
+      if (error) {
+        console.error('Error fetching departments:', error)
+        notify.error('Could not load departments')
+        return
+      }
+      setDepartments(data ?? [])
     })
   }, [])
 
@@ -235,6 +248,7 @@ function EditPersonModal({ person, onClose, onSaved }: { person: Profile; onClos
       full_name: name.trim(),
       avatar_initials: getInitials(name.trim()) || person.avatar_initials,
       role,
+      department: department || null,
       has_all_projects: showProjects ? allProjects : false,
       project_ids: showProjects && !allProjects ? projectIds : showProjects ? [] : undefined,
     }
@@ -278,6 +292,12 @@ function EditPersonModal({ person, onClose, onSaved }: { person: Profile; onClos
           {ROLES.map((r) => (
             <option key={r} value={r}>{ROLE_LABELS[r]}</option>
           ))}
+        </select>
+      </Field>
+      <Field label="Department" htmlFor="p-department">
+        <select id="p-department" value={department} onChange={(e) => setDepartment(e.target.value)} className="field">
+          <option value="">No department</option>
+          {departments.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}
         </select>
       </Field>
       {showProjects && (

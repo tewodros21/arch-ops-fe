@@ -6,13 +6,15 @@ import { differenceInCalendarDays, format, isSameDay, startOfDay, subDays } from
 import { CalendarDays, Clock, Copy, HardHat, MapPin, MoreVertical } from 'lucide-react'
 import { fetchAuditEvents, fetchLaborRequests, fetchPurchaseRequests } from '@/services'
 import { useAuth } from '@/context/AuthContext'
-import { Avatar } from '@/components/ui'
+import { Avatar, StatusBadge } from '@/components/ui'
 import { KpiCards } from '@/components/dashboard/KpiCards'
 import { SpendCharts } from '@/components/dashboard/SpendCharts'
 import { RangeSelect } from '@/components/dashboard/kit'
 import { COLORS, DONE, IN_REVIEW, isOverdue, money } from '@/components/dashboard/metrics'
 import { formatDuration } from '@/services/labor'
 import { notify } from '@/lib/notify'
+import { useT } from '@/lib/i18n'
+import { LanguageSwitch } from '@/components/ui/LanguageSwitch'
 import {
   LABOR_STATUS_LABELS,
   ROLE_LABELS,
@@ -26,7 +28,7 @@ import {
 
 const AWAITING_BY_ROLE: Record<Role, RequestStatus | null> = {
   site_engineer: null,
-  project_manager: 'awaiting_gm',
+  project_manager: 'awaiting_pm',
   ceo: null,
   finance: 'awaiting_finance',
   shopkeeper: null,
@@ -34,22 +36,22 @@ const AWAITING_BY_ROLE: Record<Role, RequestStatus | null> = {
 }
 
 const PIPELINE: { title: string; statuses: RequestStatus[] }[] = [
-  { title: 'New', statuses: ['draft', 'quote_received'] },
+  { title: 'New', statuses: ['draft', 'proforma_received'] },
   { title: 'In review', statuses: IN_REVIEW },
   { title: 'Approved', statuses: ['approved'] },
-  { title: 'Fulfillment', statuses: ['purchased', 'completed'] },
+  { title: 'Delivery & completed', statuses: ['purchased', 'partially_received', 'completed'] },
 ]
 
 // How far along the approval chain a request is, for the progress bars
 const PROGRESS: Record<RequestStatus, number> = {
   draft: 8,
-  quote_received: 20,
-  awaiting_finance: 62,
-  awaiting_gm: 40,
-  awaiting_owner: 84,
+  proforma_received: 20,
+  awaiting_pm: 38,
+  awaiting_finance: 40,
   approved: 100,
   rejected: 100,
   purchased: 100,
+  partially_received: 100,
   completed: 100,
 }
 
@@ -79,6 +81,7 @@ function dueLabel(date: string | null) {
 
 export function Dashboard() {
   const { profile } = useAuth()
+  const t = useT()
   const [requests, setRequests] = useState<PurchaseRequest[]>([])
   const [labor, setLabor] = useState<LaborRequest[]>([])
   const [activity, setActivity] = useState<AuditEvent[]>([])
@@ -115,6 +118,65 @@ export function Dashboard() {
     .slice()
     .sort((a, b) => (a.required_date ?? '9999').localeCompare(b.required_date ?? '9999'))
 
+  if (profile.role === 'shopkeeper') {
+    const deliveries = requests.filter((request) =>
+      ['purchased', 'partially_received', 'completed'].includes(request.status),
+    )
+    return (
+      <div className="space-y-5">
+        <section className="panel-dark rounded-[1.75rem] p-6 text-white sm:p-8">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <p className="text-sm text-white/60">{t('Store Keeper workspace')}</p>
+            <LanguageSwitch />
+          </div>
+          <h1 className="mt-2 text-3xl font-black">{t('Delivery tracking')}</h1>
+          <p className="mt-2 text-sm text-white/70">{t('Record deliveries by item quantity. Financial details are hidden.')}</p>
+          <p className="mt-5 text-4xl font-black">{loading ? '–' : deliveries.filter((r) => r.status !== 'completed').length}</p>
+          <p className="text-xs text-white/60">{t('open delivery requests')}</p>
+        </section>
+        <section className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-2xl font-normal text-[var(--ink)]">{t('Requests to receive')}</h2>
+            <span className="text-sm text-slate-500">{t('{n} total', { n: deliveries.length })}</span>
+          </div>
+          {loading && <p className="rounded-2xl bg-white p-6 text-sm text-slate-500">{t('Loading delivery requests…')}</p>}
+          {!loading && deliveries.length === 0 && (
+            <p className="rounded-[1.5rem] bg-white p-8 text-center text-sm text-slate-500">{t('No purchased requests are waiting for delivery.')}</p>
+          )}
+          {deliveries.map((request) => (
+            <Link
+              key={request.id}
+              to={`/requests/${request.id}`}
+              className="focus-ring block rounded-[1.5rem] bg-white p-5 transition-transform hover:-translate-y-0.5 sm:p-6"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs text-slate-500">{request.request_number} · {request.project?.name}</p>
+                  <h3 className="mt-1 text-lg font-bold text-[var(--ink)]">{request.title}</h3>
+                </div>
+                <StatusBadge status={request.status} />
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                {(request.items ?? []).map((item) => (
+                  <p key={item.id} className="rounded-xl bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink-soft)]">
+                    <span className="font-semibold text-[var(--ink)]">{item.name}</span>
+                    <span className="ml-2">{Number(item.received_quantity ?? 0).toLocaleString()} / {Number(item.quantity).toLocaleString()} {item.unit}</span>
+                    {Number(item.quantity_remaining ?? item.quantity) > 0 && (
+                      <span className="ml-2 text-[var(--accent)]">
+                        · {t('{n} remaining', { n: Number(item.quantity_remaining ?? item.quantity).toLocaleString() })}
+                      </span>
+                    )}
+                  </p>
+                ))}
+              </div>
+              <p className="mt-4 text-sm font-semibold text-[var(--accent)]">{t('Open delivery details →')}</p>
+            </Link>
+          ))}
+        </section>
+      </div>
+    )
+  }
+
   // ── Request volume for the selected range ──
   const today = startOfDay(new Date())
   const requestRangeStart = startOfDay(subDays(today, requestRangeDays - 1))
@@ -124,6 +186,7 @@ export function Dashboard() {
     const start = subDays(today, requestRangeDays - 1 - i * bucketSize)
     const end = i === bucketCount - 1 ? today : subDays(today, requestRangeDays - 1 - i * bucketSize - (bucketSize - 1))
     const onBucket = scoped.filter((r) => {
+      if (!r.created_at) return false
       const created = startOfDay(new Date(r.created_at))
       return created >= start && created <= end
     })
@@ -134,9 +197,10 @@ export function Dashboard() {
       other: onBucket.filter((r) => !DONE.includes(r.status) && !IN_REVIEW.includes(r.status)).length,
     }
   })
-  const currentCount = scoped.filter((r) => new Date(r.created_at) >= requestRangeStart).length
+  const currentCount = scoped.filter((r) => !!r.created_at && new Date(r.created_at) >= requestRangeStart).length
   const previousStart = subDays(requestRangeStart, requestRangeDays)
   const previousCount = scoped.filter((r) => {
+    if (!r.created_at) return false
     const d = new Date(r.created_at)
     return d >= previousStart && d < requestRangeStart
   }).length
@@ -160,57 +224,6 @@ export function Dashboard() {
   )
 
   const activeLabor = labor.filter((l) => !['completed', 'cancelled'].includes(l.status))
-
-  if (profile.role === 'shopkeeper') {
-    const fulfillment = requests.filter((request) => ['purchased', 'completed'].includes(request.status))
-    const inProgress = fulfillment.filter((request) => request.status === 'purchased')
-    const delivered = fulfillment.filter((request) => request.status === 'completed')
-    return (
-      <div className="space-y-5">
-        <div>
-          <h1 className="text-3xl font-black tracking-tight text-[var(--ink)]">Purchase fulfillment</h1>
-          <p className="mt-1 text-sm text-[var(--ink-soft)]">Track purchased items and confirm deliveries.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-4">
-          <Link to="/requests?status=done" className="focus-ring rounded-[1.75rem] bg-white p-5">
-            <p className="text-sm text-[var(--ink-soft)]">In progress</p>
-            <p className="mt-3 text-4xl font-black text-[var(--ink)]">{loading ? '–' : inProgress.length}</p>
-          </Link>
-          <Link to="/requests?status=done" className="focus-ring rounded-[1.75rem] bg-white p-5">
-            <p className="text-sm text-[var(--ink-soft)]">Delivered</p>
-            <p className="mt-3 text-4xl font-black text-[var(--ink)]">{loading ? '–' : delivered.length}</p>
-          </Link>
-        </div>
-        <section className="rounded-[1.75rem] bg-white p-6">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <h2 className="text-xl font-bold text-[var(--ink)]">Ready for delivery tracking</h2>
-            <Link to="/requests" className="text-sm font-semibold text-[var(--accent)]">View all</Link>
-          </div>
-          {loading ? (
-            <p className="py-8 text-center text-sm text-slate-500">Loading requests…</p>
-          ) : fulfillment.length === 0 ? (
-            <p className="py-8 text-center text-sm text-slate-500">No purchased requests yet.</p>
-          ) : (
-            <ul className="divide-y divide-black/[0.05]">
-              {fulfillment.map((request) => (
-                <li key={request.id}>
-                  <Link to={`/requests/${request.id}`} className="focus-ring flex items-center justify-between gap-3 py-4">
-                    <span className="min-w-0">
-                      <span className="block truncate text-xs text-slate-500">{request.request_number}</span>
-                      <span className="block truncate font-semibold text-[var(--ink)]">{request.title}</span>
-                    </span>
-                    <span className="shrink-0 rounded-full bg-[var(--canvas)] px-3 py-1 text-xs font-semibold text-[var(--ink)]">
-                      {request.status === 'purchased' ? 'In progress' : 'Delivered'}
-                    </span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
-    )
-  }
 
   return (
     <div className="space-y-4">
@@ -327,7 +340,7 @@ export function Dashboard() {
               <Link key={r.id} to={`/requests/${r.id}`} className="focus-ring block rounded-lg">
                 <p className="truncate text-[15px] text-[var(--ink)]">{r.title}</p>
                 <div className="mt-0.5 flex items-center justify-between text-xs text-slate-500">
-                  <span className={clsx(isOverdue(r) && 'text-[var(--accent)]')}>{dueLabel(r.required_date)}</span>
+                  <span className={clsx(isOverdue(r) && 'text-[var(--accent)]')}>{dueLabel(r.required_date ?? null)}</span>
                   <span className="text-[var(--ink)]">{PROGRESS[r.status]}%</span>
                 </div>
                 <div className="mt-2 h-1 rounded-full bg-[var(--cell)]">
@@ -470,7 +483,7 @@ function RequestCard({ request: r }: { request: PurchaseRequest }) {
       <Link to={`/requests/${r.id}`} className={clsx('flex items-center justify-between border-t px-5 py-3.5 text-sm', dark ? 'border-white/10' : 'border-black/[0.06]')}>
         <span className="flex items-center gap-2">
           <CalendarDays size={16} strokeWidth={1.75} />
-          {dueLabel(r.required_date)}
+          {dueLabel(r.required_date ?? null)}
         </span>
         <span className="font-medium">{money(Number(r.approved_amount ?? r.estimated_amount ?? 0))}</span>
       </Link>

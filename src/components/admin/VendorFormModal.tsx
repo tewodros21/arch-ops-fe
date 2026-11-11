@@ -53,7 +53,7 @@ export function VendorFormModal({ vendor, onClose, onSaved }: { vendor?: Vendor 
   return (
     <FormModal
       title={vendor ? 'Edit vendor' : 'Add a vendor'}
-      description={vendor ? 'Changes show up on every request that quotes them.' : 'Suppliers and contractors your team can quote from.'}
+      description={vendor ? 'Updates apply to historical vendor records.' : 'Legacy vendor directory entry.'}
       icon={Store}
       submitLabel={vendor ? 'Save changes' : 'Add vendor'}
       onSubmit={submit}

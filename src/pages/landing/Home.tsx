@@ -7,26 +7,26 @@ import { SiteHeader } from '@/components/layout/SiteHeader'
 import { AssetSlot } from '@/components/ui'
 import { ROLE_LABELS, type Role } from '@/types'
 
-const WORKFLOW = ['Request', 'Project Manager', 'Finance', 'Purchase', 'Delivery']
+const WORKFLOW = ['Request', 'Proforma', 'Project Manager', 'Finance', 'Purchase', 'Partial receipt', 'Complete']
 
 const STAGES = [
-  { n: '01', title: 'Finance', body: 'Checks pricing and budget before anything moves. The first gate on every spend.' },
-  { n: '02', title: 'Project Manager', body: 'Confirms the work is operationally justified on assigned projects.' },
-  { n: '03', title: 'CEO', body: 'Provides final sign-off with the full financial picture.' },
+  { n: '01', title: 'Project Manager', body: 'Reviews requests for assigned projects. A Project Manager’s own requests go straight to Finance.' },
+  { n: '02', title: 'Finance', body: 'Reviews the request, approves the amount, and records the purchase.' },
+  { n: '03', title: 'Store Keeper', body: 'Records deliveries by item and quantity, including partial receipts, without seeing financial details.' },
 ]
 
 // Role cards: drop cut-out PNGs (transparent background) into public/assets/roles/
 const ROLES: { role: Role; blurb: string; bg: string; fg: string }[] = [
-  { role: 'site_engineer', blurb: 'Raises purchase requests for site needs and tracks status.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
-  { role: 'finance', blurb: 'Checks pricing and budget before requests move to project review.', bg: 'var(--sun)', fg: 'var(--ink)' },
-  { role: 'project_manager', blurb: 'Reviews requests for assigned projects after Finance.', bg: 'var(--accent)', fg: '#ffffff' },
-  { role: 'ceo', blurb: 'Provides executive oversight and final approval on requests.', bg: 'var(--panel-dark)', fg: '#ffffff' },
-  { role: 'admin', blurb: 'Creates users, projects and the rules the workflow follows.', bg: '#e6e1da', fg: 'var(--ink)' },
-  { role: 'shopkeeper', blurb: 'Supports the shop and day-to-day site operations.', bg: 'var(--sun-soft)', fg: 'var(--ink)' },
+  { role: 'site_engineer', blurb: 'Creates project purchase requests with items, quantities, estimates and a supplier Proforma.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
+  { role: 'project_manager', blurb: 'Reviews requests for assigned projects before they go to Finance.', bg: 'var(--sun)', fg: 'var(--ink)' },
+  { role: 'finance', blurb: 'Reviews pricing, approves the spend and records the purchase.', bg: 'var(--accent)', fg: '#ffffff' },
+  { role: 'shopkeeper', blurb: 'Tracks item deliveries and records full or partial quantities received.', bg: 'var(--panel-dark)', fg: '#ffffff' },
+  { role: 'ceo', blurb: 'Creates requests and gets visibility across project purchasing.', bg: '#d9e8e4', fg: 'var(--ink)' },
+  { role: 'admin', blurb: 'Runs users, projects and the rules the workflow follows.', bg: '#e6e1da', fg: 'var(--ink)' },
 ]
 
 const BEFORE = ['Phone calls for every request', 'Screenshots as the only record', 'No idea what is pending or late', 'Manual follow-ups on every purchase']
-const AFTER = ['One request, routed automatically', 'Quotes and receipts attached', 'Live view of pending and delayed spend', 'Audit trail nobody can edit']
+const AFTER = ['Project Manager → Finance approvals', 'Proforma and purchase documents attached', 'Partial deliveries tracked by item quantity', 'Audit trail nobody can edit']
 
 export function Home() {
   const { profile } = useAuth()
@@ -107,7 +107,7 @@ export function Home() {
                 <ArrowRight size={20} />
               </a>
               <p className="ml-1 max-w-xs text-sm text-[var(--ink-soft)]">
-                Requests, quotes and three-level approvals in one clear record.
+                Project Manager and Finance approvals, with deliveries tracked by item.
               </p>
             </div>
           </div>
@@ -139,7 +139,7 @@ export function Home() {
             <div className="flex flex-col justify-between rounded-[2rem] bg-[#e6e1da] p-7">
               <div className="flex items-start justify-between gap-4">
                 <p className="text-xl leading-snug font-medium text-[var(--ink)]">
-                  No more phone calls, screenshots or lost quotes to get a purchase approved.
+                  No more phone calls, screenshots or lost Proforma documents to get a purchase approved.
                 </p>
                 <Quote size={28} className="shrink-0 fill-[var(--ink)] text-[var(--ink)]" />
               </div>
@@ -148,11 +148,11 @@ export function Home() {
 
             <div className="flex flex-col justify-between rounded-[2rem] bg-[var(--sun)] p-7">
               <p className="text-xl leading-snug font-semibold text-[var(--ink)]">
-                Five roles, one workflow, and everyone knows what's waiting on them.
+                Six roles, one workflow, and everyone knows what's waiting on them.
               </p>
               <div className="mt-6 flex items-center justify-between gap-3">
                 <div className="flex -space-x-2">
-                  {['SE', 'FI', 'PM', 'CE', 'AD', 'SH'].map((i, idx) => (
+                  {['SE', 'PM', 'FI', 'SK', 'CE', 'AD'].map((i, idx) => (
                     <span
                       key={i}
                       className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-[var(--sun)] text-xs font-bold"
@@ -194,7 +194,7 @@ export function Home() {
             <div>
               <p className="text-sm font-semibold tracking-[0.2em] text-[var(--accent)] uppercase">The workflow</p>
               <h2 className="mt-4 text-[clamp(2.5rem,5vw,4.75rem)] leading-[0.92] font-black tracking-[-0.04em] text-[var(--ink)]">
-                Three sign-offs. Zero chasing.
+                Project review. Finance approval. Delivery tracked.
               </h2>
             </div>
             <AssetSlot src="/assets/3d/workflow.png" label="Workflow 3D asset" className="mt-6 h-72 w-full sm:h-80 lg:-mx-4 lg:w-[calc(100%+2rem)]" />

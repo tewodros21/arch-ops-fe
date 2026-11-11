@@ -8,7 +8,7 @@ import { approvedValue, compactMoney, DONE, IN_REVIEW, isOverdue, isStuck, money
 
 const AWAITING_BY_ROLE: Record<Role, RequestStatus | null> = {
   site_engineer: null,
-  project_manager: 'awaiting_gm',
+  project_manager: 'awaiting_pm',
   ceo: null,
   finance: 'awaiting_finance',
   shopkeeper: null,
@@ -83,7 +83,10 @@ export function KpiCards({
     }
   }
 
-  const purchasedThisMonth = scoped.filter((r) => PAID.includes(r.status) && isSameMonth(new Date(r.updated_at ?? r.created_at), now))
+  const purchasedThisMonth = scoped.filter((r) => {
+    const updatedAt = r.updated_at ?? r.created_at
+    return PAID.includes(r.status) && !!updatedAt && isSameMonth(new Date(updatedAt), now)
+  })
   const purchasedValue = purchasedThisMonth.reduce((s, r) => s + Number(r.actual_amount ?? r.approved_amount ?? r.estimated_amount ?? 0), 0)
 
   const approved = scoped.filter((r) => DONE.includes(r.status))

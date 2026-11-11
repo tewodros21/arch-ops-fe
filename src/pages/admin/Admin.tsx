@@ -13,7 +13,7 @@ type Tab = 'users' | 'projects' | 'departments' | 'site-employees'
 const TABS: { id: Tab; label: string; icon: typeof Users; roles: Role[]; subtitle: string }[] = [
   { id: 'users', label: 'Users', icon: Users, roles: ['admin'], subtitle: 'Create accounts and assign projects for managers and site engineers' },
   { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin', 'ceo'], subtitle: 'Sites requests are raised against, with spend against budget' },
-  { id: 'departments', label: 'Departments', icon: Building2, roles: ['site_engineer'], subtitle: 'Site crew teams managed by the site engineer' },
+  { id: 'departments', label: 'Departments', icon: Building2, roles: ['admin', 'site_engineer'], subtitle: 'Site crew teams managed by the site engineer' },
   { id: 'site-employees', label: 'Site employees', icon: HardHat, roles: ['admin', 'site_engineer'], subtitle: 'Manage site workers who do not need login accounts' },
 ]
 
