@@ -106,12 +106,26 @@ export function RequestDetail() {
   const req = request
   const role = profile?.role
   const isShopkeeper = role === 'shopkeeper'
+  if (isShopkeeper && !['purchased', 'partially_received', 'completed'].includes(req.status)) {
+    return (
+      <div className="rounded-[1.75rem] bg-white px-6 py-16 text-center">
+        <p className="text-2xl font-black text-[var(--ink)]">{t('Request not available')}</p>
+        <p className="mx-auto mt-3 max-w-md text-sm text-slate-500">{t('Shopkeepers can view requests once Finance has purchased the items.')}</p>
+        <Link to="/requests" className="mt-5 inline-block text-sm font-medium text-[var(--accent)] underline underline-offset-4">
+          {t('Back to requests')}
+        </Link>
+      </div>
+    )
+  }
   const isRequester = !!profile && profile.id === req.requester_id
   const myStage = role ? ROLE_STAGE[role] : null
   const currentStage = stageForStatus(req.status)
   const myTurn = !!myStage && currentStage === myStage
+  const projectIds = req.project_ids?.length ? req.project_ids : [req.project_id]
+  const assignedToProject =
+    role !== 'project_manager' || profile?.has_all_projects || projectIds.some((projectId) => profile?.project_ids.includes(projectId))
   // The server blocks self-approval too; hide the panel instead of letting it fail
-  const canAct = myTurn && !isRequester
+  const canAct = myTurn && !isRequester && assignedToProject
   const editable = isRequester && EDITABLE_STATUSES.includes(req.status)
   const canPurchase = role === 'finance'
   const canSetAmount = role === 'finance' && currentStage === 'finance'
@@ -151,6 +165,7 @@ export function RequestDetail() {
     { label: 'Paid', value: req.actual_amount },
   ]).filter((a) => a.value != null)
   const headline = amounts[amounts.length - 1]
+  const projectNames = (req.projects?.length ? req.projects : req.project ? [req.project] : []).map((project) => project.name)
 
   function pickFile(setter: (f: File | null) => void) {
     return (file: File | null) => {
@@ -382,7 +397,7 @@ export function RequestDetail() {
           <div className="min-w-0 flex-1">
             <h1 className="text-[clamp(1.9rem,4vw,3rem)] leading-[1.02] font-black tracking-[-0.035em] break-words text-[var(--ink)]">{req.title}</h1>
             <p className="mt-2 text-sm text-[var(--ink-soft)]">
-              {[req.project?.name, req.department].filter(Boolean).join(' · ')}
+              {projectNames.join(', ')}{!isShopkeeper && req.department ? ` · ${req.department}` : ''}
             </p>
           </div>
           {!isShopkeeper && headline && (

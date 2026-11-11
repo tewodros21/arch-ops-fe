@@ -11,6 +11,7 @@ import type {
   RequestStatus,
   Role,
   SupplierPaymentMethod,
+  SiteEmployee,
   Vendor,
   VendorQuotation,
 } from '@/types'
@@ -51,6 +52,8 @@ export interface RequestInput {
   supplier_payment_method: SupplierPaymentMethod | ''
   supplier_bank_name: string
   supplier_account_number: string
+  project_ids: string[]
+  department: string
   estimated_amount: number
   justification: string
   required_date: string | null
@@ -64,6 +67,11 @@ export interface ItemInput {
   description: string | null
 }
 
+export interface ItemReceiptInput {
+  id: string
+  quantity_received: number
+}
+
 export interface QuotationInput {
   vendor_id: string
   amount: number
@@ -71,26 +79,35 @@ export interface QuotationInput {
   notes: string | null
 }
 
-export type VendorInput = Pick<Vendor, 'name' | 'contact_person' | 'phone' | 'email' | 'services' | 'address'> & { is_active: boolean }
+export type VendorInput = Pick<Vendor, 'name' | 'contact_person' | 'phone' | 'email' | 'services' | 'address'> & {
+  is_active: boolean
+}
+
 export type ProjectInput = Pick<Project, 'name' | 'code' | 'client_name' | 'location' | 'budget' | 'is_active'>
 export type DepartmentInput = Pick<Department, 'name' | 'is_active'>
+export type SiteEmployeeInput = Pick<SiteEmployee, 'full_name' | 'department' | 'is_active' | 'notes'>
+export type SiteEmployeePatch = Partial<SiteEmployeeInput>
 
 export interface ProfilePatch {
   full_name?: string
   avatar_initials?: string
   role?: Role
-  department?: string | null
   is_active?: boolean
   assigned_project_ids?: string[]
+  has_all_projects?: boolean
+  project_ids?: string[]
+  password?: string
 }
 
-/** An admin adding a teammate; they sign in with the temporary password and change it on their Account page */
+/** An admin adding a teammate; they sign in with the temporary password and change it on first login */
 export interface NewUserInput {
   email: string
   full_name: string
   role: Role
   password: string
   assigned_project_ids?: string[]
+  has_all_projects?: boolean
+  project_ids?: string[]
 }
 
 export interface LaborInput {
@@ -121,7 +138,6 @@ export type VendorRequestSummary = Pick<
 
 export interface VendorQuoteRow extends Omit<VendorQuotation, 'vendor'> {
   request: VendorRequestSummary | null
-  /** Every quote amount on the same request, this one included */
   competing: number[]
 }
 
@@ -163,7 +179,7 @@ export interface Backend {
     list(opts?: { limit?: number }): Promise<Result<Profile[]>>
     /** Admin only: creates the login and the profile in one step (there is no public sign-up) */
     create(input: NewUserInput): Promise<Result<Profile>>
-    /** Admin edit of anyone's name, role or department */
+    /** Admin edit of a login user's profile, role and project assignments */
     update(id: string, patch: ProfilePatch): Promise<Result<Profile>>
   }
 
@@ -171,6 +187,13 @@ export interface Backend {
     /** member_count is filled when withMemberCount is set */
     list(opts?: { activeOnly?: boolean; withMemberCount?: boolean }): Promise<Result<Department[]>>
     save(input: DepartmentInput, id?: string): Promise<Result<Department>>
+    remove(id: string): Promise<Result>
+  }
+
+  siteEmployees: {
+    list(opts?: { department?: string; activeOnly?: boolean; search?: string }): Promise<Result<SiteEmployee[]>>
+    create(input: SiteEmployeeInput): Promise<Result<SiteEmployee>>
+    update(id: string, patch: SiteEmployeePatch): Promise<Result<SiteEmployee>>
     remove(id: string): Promise<Result>
   }
 
@@ -208,6 +231,7 @@ export interface Backend {
     recordPurchase(id: string, actualAmount: number): Promise<Result>
     receive(id: string, input: ReceiptInput): Promise<Result>
     complete(id: string): Promise<Result>
+    updateReceivedItems(id: string, items: ItemReceiptInput[]): Promise<Result>
   }
 
   attachments: {

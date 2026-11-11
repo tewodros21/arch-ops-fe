@@ -152,7 +152,7 @@ export function Home() {
               </p>
               <div className="mt-6 flex items-center justify-between gap-3">
                 <div className="flex -space-x-2">
-                  {['SE', 'PM', 'FI', 'SK', 'CEO', 'AD'].map((i, idx) => (
+                  {['SE', 'PM', 'FI', 'SK', 'CE', 'AD'].map((i, idx) => (
                     <span
                       key={i}
                       className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-[var(--sun)] text-xs font-bold"
@@ -237,7 +237,7 @@ export function Home() {
             <p className="max-w-xs text-sm text-[var(--ink-soft)]">Each role sees exactly what's waiting on them, and nothing they shouldn't.</p>
           </div>
 
-          <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             {ROLES.map((r) => (
               <article
                 key={r.role}

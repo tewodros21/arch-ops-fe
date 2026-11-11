@@ -43,7 +43,9 @@ export function DepartmentsTab() {
 
     const ok = await confirm({
       title: `Delete ${d.name}?`,
-      body: 'Past purchase requests keep their saved department name.',
+      body: count
+        ? `${count} ${count === 1 ? 'site employee is' : 'site employees are'} still in this department. Move them first, or archive instead.`
+        : 'Past purchase requests keep their saved department name. This only removes it from the list.',
       confirmLabel: 'Delete department',
       tone: 'danger',
       icon: Trash2,
@@ -73,9 +75,9 @@ export function DepartmentsTab() {
       {loading ? (
         <p className="py-16 text-center text-sm text-slate-500">Loading departments…</p>
       ) : departments.length === 0 ? (
-        <EmptyCard icon={Building2} title="No departments yet" body="Add the teams your people and requests belong to." />
+        <EmptyCard icon={Building2} title="No departments yet" body="Add the site teams your crew and requests belong to." />
       ) : (
-        <ListCard columns={['Department', 'People', 'Status', '']} template={TEMPLATE}>
+        <ListCard columns={['Department', 'Site crew', 'Status', '']} template={TEMPLATE}>
           {departments.map((d) => (
             <li key={d.id} className={clsx('flex items-center gap-3 rounded-2xl px-3 py-3 transition-colors hover:bg-[var(--canvas)] md:grid md:gap-4', TEMPLATE)}>
               <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -85,7 +87,7 @@ export function DepartmentsTab() {
                 <div className="min-w-0">
                   <p className="truncate text-sm font-semibold text-[var(--ink)]">{d.name}</p>
                   <p className="text-xs text-slate-500 md:hidden">
-                    {d.member_count ?? 0} people · {d.is_active ? 'Active' : 'Archived'}
+                    {d.member_count ?? 0} site employees · {d.is_active ? 'Active' : 'Archived'}
                   </p>
                 </div>
               </div>

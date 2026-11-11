@@ -22,15 +22,16 @@ import {
   type AuditEvent,
   type LaborRequest,
   type PurchaseRequest,
+  type Role,
   type RequestStatus,
 } from '@/types'
 
-const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
-  ceo: null,
-  project_manager: 'awaiting_pm',
+const AWAITING_BY_ROLE: Record<Role, RequestStatus | null> = {
   site_engineer: null,
-  shopkeeper: null,
+  project_manager: 'awaiting_pm',
+  ceo: null,
   finance: 'awaiting_finance',
+  shopkeeper: null,
   admin: null,
 }
 
@@ -111,7 +112,7 @@ export function Dashboard() {
 
   if (!profile) return null
 
-  const scoped = requests
+  const scoped = profile.role === 'site_engineer' ? requests.filter((r) => r.requester_id === profile.id) : requests
   const awaitingStatus = AWAITING_BY_ROLE[profile.role]
   const priority = (awaitingStatus ? requests.filter((r) => r.status === awaitingStatus) : scoped.filter((r) => !DONE.includes(r.status) && r.status !== 'rejected'))
     .slice()

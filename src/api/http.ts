@@ -1,21 +1,14 @@
 import { API_BASE_URL } from './config'
 import type { ApiError, ErrorCode, Result } from './types'
 
-// Small fetch client for the Django REST API (public/docs/openapi.yaml): JWT bearer auth with one
-// silent refresh on 401, DRF page-number pagination, and DRF error bodies mapped to ApiError.
+// Fetch client for the Django REST API: cookie session auth + CSRF, DRF page-number
+// pagination, and DRF error bodies mapped to ApiError.
 
-const TOKEN_KEY = 'archops.auth'
+const SESSION_FLAG_KEY = 'archops.signedIn'
 const PAGE_SIZE = 200
-/** Refresh the access JWT this long before `exp` so polls never hit a 401 first */
-const REFRESH_AHEAD_MS = 60_000
 
-interface Tokens {
-  access: string
-  refresh: string
-}
-
-/** Per-tab session only — tabs do not share login state */
-const tokenStore: Storage | null = typeof window !== 'undefined' ? window.sessionStorage : null
+/** Per-tab signed-in flag only (the real session lives in the httpOnly cookie) */
+const flagStore: Storage | null = typeof window !== 'undefined' ? window.sessionStorage : null
 
 export interface Page<T> {
   count: number
@@ -31,47 +24,37 @@ interface Options {
   query?: Query
   body?: unknown
   form?: FormData
-  /** false for login / refresh, which must not send or refresh a token */
+  /** false for csrf / login, which must work without an existing session */
   auth?: boolean
 }
 
-// ── Tokens ───────────────────────────────────────────────────────────────────
+// ── Session flag (UI only) ───────────────────────────────────────────────────
 
 const listeners = new Set<(signedIn: boolean) => void>()
 
-function readTokens(): Tokens | null {
+function readSignedInFlag() {
   try {
-    const raw = tokenStore?.getItem(TOKEN_KEY)
-    return raw ? (JSON.parse(raw) as Tokens) : null
+    return flagStore?.getItem(SESSION_FLAG_KEY) === '1'
   } catch {
-    return null
+    return false
   }
 }
 
 export function hasSession() {
-  return !!readTokens()
+  return readSignedInFlag()
 }
 
-export function refreshToken() {
-  return readTokens()?.refresh ?? null
-}
-
-/** Stores (or clears) this tab's token pair and tells listeners when the signed-in state flips */
-export function setTokens(tokens: Tokens | null, opts?: { quiet?: boolean }) {
-  const previous = readTokens()
-  const wasSignedIn = !!previous
+/** Marks this tab signed in/out and notifies listeners when the flag flips */
+export function setSession(signedIn: boolean, opts?: { quiet?: boolean }) {
+  const wasSignedIn = readSignedInFlag()
   try {
-    if (tokens) tokenStore?.setItem(TOKEN_KEY, JSON.stringify(tokens))
-    else tokenStore?.removeItem(TOKEN_KEY)
+    if (signedIn) flagStore?.setItem(SESSION_FLAG_KEY, '1')
+    else flagStore?.removeItem(SESSION_FLAG_KEY)
   } catch {
-    // Storage blocked (private mode): the session lasts until reload
+    // Storage blocked (private mode): the flag lasts until reload
   }
-  const signedIn = !!tokens
-  if (tokens) scheduleProactiveRefresh()
-  else clearProactiveRefresh()
   if (opts?.quiet) return
-  // Also notify when switching accounts while tokens were already present (stale/expired session)
-  if (wasSignedIn !== signedIn || (tokens != null && previous?.access !== tokens.access)) {
+  if (wasSignedIn !== signedIn) {
     listeners.forEach((l) => l(signedIn))
   }
 }
@@ -83,89 +66,19 @@ export function onSessionChange(listener: (signedIn: boolean) => void) {
   }
 }
 
-function jwtPayload(token: string): Record<string, unknown> | null {
-  try {
-    const part = token.split('.')[1]
-    if (!part) return null
-    const normalized = part.replace(/-/g, '+').replace(/_/g, '/')
-    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
-    return JSON.parse(atob(padded)) as Record<string, unknown>
-  } catch {
-    return null
-  }
+/** @deprecated Kept for call-site compatibility; session auth has no refresh token */
+export function refreshToken(): null {
+  return null
 }
 
-function accessExpiresAt(access: string): number | null {
-  const exp = jwtPayload(access)?.exp
-  return typeof exp === 'number' ? exp * 1000 : null
-}
-
-let refreshTimer: ReturnType<typeof setTimeout> | null = null
-
-function clearProactiveRefresh() {
-  if (refreshTimer != null) {
-    clearTimeout(refreshTimer)
-    refreshTimer = null
-  }
-}
-
-function scheduleProactiveRefresh() {
-  clearProactiveRefresh()
-  const access = readTokens()?.access
-  if (!access) return
-  const expiresAt = accessExpiresAt(access)
-  if (expiresAt == null) return
-  const delay = Math.max(expiresAt - Date.now() - REFRESH_AHEAD_MS, 0)
-  refreshTimer = setTimeout(() => {
-    refreshTimer = null
-    if (!hasSession()) return
-    void refreshTokens().then((ok) => {
-      if (ok) scheduleProactiveRefresh()
-    })
-  }, delay)
-}
-
-/** Refresh now if the access token is missing, expired, or inside the skew window */
-async function ensureFreshAccess() {
-  const access = readTokens()?.access
-  if (!access) return
-  const expiresAt = accessExpiresAt(access)
-  if (expiresAt == null) return
-  if (expiresAt - Date.now() > REFRESH_AHEAD_MS) return
-  await refreshTokens()
-}
-
-// Concurrent 401s in this tab share one refresh call
-let refreshing: Promise<boolean> | null = null
-
-function refreshTokens(): Promise<boolean> {
-  refreshing ??= (async () => {
-    const before = readTokens()
-    const refresh = before?.refresh
-    if (!refresh) return false
-    const { data } = await request<Partial<Tokens>>('POST', '/auth/refresh/', { body: { refresh }, auth: false })
-    if (data?.access) {
-      // Quiet: same user in this tab — do not reload profile on every rotation
-      setTokens({ access: data.access, refresh: data.refresh ?? refresh }, { quiet: true })
-      return true
-    }
-    // A parallel refresh in this same tab may have already rotated the token
-    const after = readTokens()
-    if (after?.access && after.refresh && after.refresh !== refresh) {
-      scheduleProactiveRefresh()
-      return true
-    }
-    setTokens(null)
-    return false
-  })().finally(() => {
-    refreshing = null
-  })
-  return refreshing
+/** @deprecated Use setSession */
+export function setTokens(tokens: { access?: string; refresh?: string } | null, opts?: { quiet?: boolean }) {
+  setSession(!!tokens, opts)
 }
 
 /**
  * Browsers can clone sessionStorage into a tab opened from this app (window.opener).
- * Drop cloned auth so the new tab does not share or rotate the parent's refresh token.
+ * Drop the cloned signed-in flag so the new tab must establish its own server session.
  */
 function dropAuthClonedFromOpener() {
   try {
@@ -175,31 +88,57 @@ function dropAuthClonedFromOpener() {
     } catch {
       return
     }
-    tokenStore?.removeItem(TOKEN_KEY)
+    flagStore?.removeItem(SESSION_FLAG_KEY)
   } catch {
     // ignore
   }
 }
 
 if (typeof window !== 'undefined') {
-  // Stop using the old shared localStorage session if present
   try {
-    window.localStorage.removeItem(TOKEN_KEY)
+    window.localStorage.removeItem('archops.auth')
   } catch {
     // ignore
   }
   dropAuthClonedFromOpener()
-  scheduleProactiveRefresh()
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible' || !hasSession()) return
-    void ensureFreshAccess().then(() => scheduleProactiveRefresh())
-  })
+}
+
+// ── CSRF ─────────────────────────────────────────────────────────────────────
+
+function readCookie(name: string) {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&')}=([^;]*)`))
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+let csrfReady: Promise<string | null> | null = null
+
+/** Ensures the csrftoken cookie exists and returns its value */
+export async function ensureCsrf(): Promise<string | null> {
+  const existing = readCookie('csrftoken')
+  if (existing) return existing
+  csrfReady ??= (async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/csrf/`, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+      if (!res.ok) return readCookie('csrftoken')
+      const data = (await res.json()) as { csrfToken?: string }
+      return data.csrfToken ?? readCookie('csrftoken')
+    } catch {
+      return readCookie('csrftoken')
+    } finally {
+      csrfReady = null
+    }
+  })()
+  return csrfReady
 }
 
 // ── Requests ─────────────────────────────────────────────────────────────────
 
 function buildUrl(path: string, query?: Query) {
-  // Pagination "next" links come back absolute
   const url = new URL(/^https?:\/\//.test(path) ? path : `${API_BASE_URL}${path}`)
   for (const [key, value] of Object.entries(query ?? {})) {
     if (value == null || value === '') continue
@@ -210,8 +149,11 @@ function buildUrl(path: string, query?: Query) {
 
 async function send(method: string, url: string, opts: Options) {
   const headers: Record<string, string> = { Accept: 'application/json' }
-  const token = opts.auth === false ? null : readTokens()?.access
-  if (token) headers.Authorization = `Bearer ${token}`
+  const unsafe = !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method.toUpperCase())
+  if (unsafe) {
+    const csrf = await ensureCsrf()
+    if (csrf) headers['X-CSRFToken'] = csrf
+  }
   let body: BodyInit | undefined
   if (opts.form) body = opts.form
   else if (opts.body !== undefined) {
@@ -219,7 +161,7 @@ async function send(method: string, url: string, opts: Options) {
     body = JSON.stringify(opts.body)
   }
   try {
-    return await fetch(url, { method, headers, body })
+    return await fetch(url, { method, headers, body, credentials: 'include' })
   } catch {
     return null
   }
@@ -264,16 +206,14 @@ async function parseError(res: Response): Promise<ApiError> {
 
 export async function request<T>(method: string, path: string, opts: Options = {}): Promise<Result<T>> {
   const url = buildUrl(path, opts.query)
-  if (opts.auth !== false && hasSession()) await ensureFreshAccess()
-  let res = await send(method, url, opts)
+  const res = await send(method, url, opts)
 
-  if (res?.status === 401 && opts.auth !== false && hasSession() && (await refreshTokens())) {
-    res = await send(method, url, opts)
-  }
   if (!res) return { data: null, error: { message: 'Could not reach the server, check your connection', code: 'network' } }
   if (!res.ok) {
-    // Refresh failed or the token was revoked: drop the session so the app shows the login page
-    if (res.status === 401 && opts.auth !== false) setTokens(null)
+    // Cookie session gone: clear the tab flag when /auth/me/ fails
+    if ((res.status === 401 || res.status === 403) && path.includes('/auth/me/') && hasSession()) {
+      setSession(false)
+    }
     return { data: null, error: await parseError(res) }
   }
   if (res.status === 204) return { data: null, error: null }

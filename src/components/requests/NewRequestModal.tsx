@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
@@ -77,6 +77,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     title: '',
     description: '',
     project_id: '',
+    project_ids: [] as string[],
+    department: profile?.department ?? '',
     vendor_name: '',
     vendor_location: '',
     proforma_amount: '',
@@ -88,7 +90,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     required_date: '',
   })
 
-  function applyProjectsResult({ data, error }: Awaited<ReturnType<typeof fetchProjects>>) {
+  const applyProjectsResult = useCallback(({ data, error }: Awaited<ReturnType<typeof fetchProjects>>) => {
     setLoadingProjects(false)
     if (error) {
       console.error('Error fetching projects:', error)
@@ -97,12 +99,17 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       return
     }
     setProjectLoadFailed(false)
-    setProjects(data ?? [])
-  }
+    const assigned = (profile?.role === 'site_engineer' || profile?.role === 'project_manager') && !profile.has_all_projects
+      ? (data ?? []).filter((project) => (profile.project_ids ?? profile.assigned_project_ids ?? []).includes(project.id))
+      : data ?? []
+    setProjects(assigned)
+  }, [profile])
 
-  async function loadProjects() {
+  const loadProjects = useCallback(async () => {
+    setLoadingProjects(true)
+    setProjectLoadFailed(false)
     applyProjectsResult(await fetchProjects())
-  }
+  }, [applyProjectsResult])
 
   useEffect(() => {
     let active = true
@@ -112,7 +119,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     return () => {
       active = false
     }
-  }, [])
+  }, [applyProjectsResult])
 
   // Edit mode: prefill from the saved request
   useEffect(() => {
@@ -129,6 +136,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         title: r.title,
         description: r.description ?? '',
         project_id: r.project_id,
+        project_ids: r.project_ids?.length ? r.project_ids : [r.project_id],
+        department: r.department ?? '',
         vendor_name: r.vendor_name ?? r.quotations?.[0]?.vendor?.name ?? '',
         vendor_location: r.vendor_location ?? r.quotations?.[0]?.vendor?.address ?? '',
         proforma_amount: String(r.proforma_amount ?? r.quotations?.[0]?.amount ?? ''),
@@ -192,10 +201,10 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       ? 'Could not load projects. Try again.'
       : projects.length === 0
         ? 'No active projects are available. Ask an admin to add or activate one before creating a purchase request.'
-        : 'Choose which project this purchase is for'
+      : 'Choose at least one project for this purchase'
 
   const stepErrors: Record<number, string | null> = {
-    0: !form.title.trim() ? 'Add a short title for this request' : !form.project_id ? projectError : null,
+    0: !form.title.trim() ? 'Add a short title for this request' : form.project_ids.length === 0 ? projectError : null,
     1: badItem ? 'Each item needs a name and a quantity' : null,
     2: !(estimate > 0) ? 'Enter an estimated amount to continue' : null,
     3: paymentError,
@@ -247,6 +256,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       title: form.title.trim(),
       description: form.description.trim(),
       project_id: form.project_id,
+      project_ids: form.project_ids,
+      department: form.department.trim() || 'General',
       vendor_name: form.vendor_name.trim(),
       vendor_location: form.vendor_location.trim(),
       proforma_amount: form.proforma_amount ? Number(form.proforma_amount) : null,
@@ -319,7 +330,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     navigate(`/requests/${requestId}`)
   }
 
-  const project = projects.find((p) => p.id === form.project_id)
+  const selectedProjects = projects.filter((p) => form.project_ids.includes(p.id))
+  const project = selectedProjects[0]
   const err = (s: number, when: boolean) => showErrors && step === s && when
 
   return (
@@ -344,7 +356,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
           <p className="truncate text-sm text-white">{form.title || 'Untitled request'}</p>
           <div className="flex items-end justify-between gap-2">
             <span className="truncate text-xs text-white/50">
-              {project?.name ?? 'No project yet'}
+              {selectedProjects.map((p) => p.name).join(', ') || 'No project yet'}
               {filledItems.length > 0 && ` · ${filledItems.length} item${filledItems.length === 1 ? '' : 's'}`}
             </span>
             <span className="text-xl font-bold text-white">{money(estimate)}</span>
@@ -376,15 +388,21 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             />
           </Field>
 
-          <Field label="Project" error={err(0, !form.project_id)}>
+          <Field label="Project(s)" error={err(0, form.project_ids.length === 0)}>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {projects.map((p) => {
-                const active = form.project_id === p.id
+                const active = form.project_ids.includes(p.id)
                 return (
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => update('project_id', p.id)}
+                    onClick={() => {
+                      const projectIds = active
+                        ? form.project_ids.filter((id) => id !== p.id)
+                        : [...form.project_ids, p.id]
+                      setTouched(true)
+                      setForm((current) => ({ ...current, project_ids: projectIds, project_id: projectIds[0] ?? '' }))
+                    }}
                     aria-pressed={active}
                     className={clsx(
                       'focus-ring flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all',

@@ -4,7 +4,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   ceo: 'CEO',
   project_manager: 'Project Manager',
   site_engineer: 'Site Engineer',
-  shopkeeper: 'Store Keeper',
+  shopkeeper: 'Shopkeeper',
   finance: 'Finance',
   admin: 'Administrator',
 }
@@ -35,6 +35,7 @@ export const STATUS_COLORS: Record<RequestStatus, string> = {
 
 export const ATTACHMENT_TYPE_LABELS: Record<AttachmentType, string> = {
   proforma: 'Proforma',
+  quotation: 'Quotation',
   invoice: 'Invoice',
   receipt: 'Receipt',
   delivery: 'Delivery Document',

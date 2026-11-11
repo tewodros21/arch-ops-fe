@@ -9,9 +9,11 @@ import { NewRequestModal } from '@/components/requests/NewRequestModal'
 import { LaborRequestModal } from '@/components/labor/LaborRequestModal'
 import { ProjectFormModal } from '@/components/admin/ProjectFormModal'
 import { DepartmentFormModal } from '@/components/admin/DepartmentFormModal'
+import { SiteEmployeeFormModal } from '@/components/admin/SiteEmployeeFormModal'
 import { UserFormModal } from '@/components/admin/UserFormModal'
+import { VendorFormModal } from '@/components/admin/VendorFormModal'
 import { useAuth } from '@/context/AuthContext'
-import { DEPARTMENT_CREATED_EVENT, PROJECT_CREATED_EVENT, USER_CREATED_EVENT } from '@/constants'
+import { DEPARTMENT_CREATED_EVENT, PROJECT_CREATED_EVENT, SITE_EMPLOYEE_CREATED_EVENT, USER_CREATED_EVENT, VENDOR_CREATED_EVENT } from '@/constants'
 
 const COLLAPSED_KEY = 'archops.sidebar-collapsed'
 
@@ -63,10 +65,10 @@ export function DashboardLayout() {
         </div>
       </div>
       <BottomNav onMore={() => setNavOpen(true)} />
-      {creating === 'request' && !editing && <NewRequestModal onClose={closeCreate} />}
+      {creating === 'request' && !editing && profile && ['site_engineer', 'admin', 'ceo', 'project_manager', 'finance'].includes(profile.role) && <NewRequestModal onClose={closeCreate} />}
       {editing && <NewRequestModal key={editing} editId={editing} onClose={closeCreate} />}
       {creating === 'labor' && <LaborRequestModal onClose={closeCreate} />}
-      {creating === 'project' && profile && profile.role === 'admin' && (
+      {creating === 'project' && profile && (profile.role === 'admin' || profile.role === 'ceo') && (
         <ProjectFormModal
           project={null}
           onClose={closeCreate}
@@ -76,11 +78,27 @@ export function DashboardLayout() {
       {creating === 'user' && profile?.role === 'admin' && (
         <UserFormModal onClose={closeCreate} onSaved={() => window.dispatchEvent(new Event(USER_CREATED_EVENT))} />
       )}
-      {creating === 'department' && profile && profile.role === 'admin' && (
+      {creating === 'department' && profile && (profile.role === 'admin' || profile.role === 'site_engineer') && (
         <DepartmentFormModal
           department={null}
           onClose={closeCreate}
           onSaved={() => window.dispatchEvent(new Event(DEPARTMENT_CREATED_EVENT))}
+        />
+      )}
+      {creating === 'site-employee' && profile && (profile.role === 'admin' || profile.role === 'site_engineer') && (
+        <SiteEmployeeFormModal
+          employee={null}
+          onClose={closeCreate}
+          onSaved={() => window.dispatchEvent(new Event(SITE_EMPLOYEE_CREATED_EVENT))}
+        />
+      )}
+      {creating === 'vendor' && profile && (profile.role === 'admin' || profile.role === 'finance') && (
+        <VendorFormModal
+          onClose={closeCreate}
+          onSaved={() => {
+            window.dispatchEvent(new Event(VENDOR_CREATED_EVENT))
+            closeCreate()
+          }}
         />
       )}
     </div>

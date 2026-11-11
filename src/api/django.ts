@@ -1,9 +1,9 @@
-import type { AppNotification, AuditEvent, Department, LaborRequest, Profile, Project, PurchaseRequest, Vendor } from '@/types'
-import { hasSession, http, list, onSessionChange, refreshToken, request, setTokens, type Page } from './http'
-import type { Backend, ReceiptInput, Result, VendorHistory } from './types'
+import type { AppNotification, AuditEvent, Department, LaborRequest, Profile, Project, PurchaseRequest, SiteEmployee, Vendor } from '@/types'
+import { ensureCsrf, hasSession, http, list, onSessionChange, request, setSession, type Page } from './http'
+import type { Backend, ItemReceiptInput, ReceiptInput, Result, SiteEmployeeInput, SiteEmployeePatch, VendorHistory, VendorInput } from './types'
 
-// Data source for the Django REST API. Every path, body and response here is specified in
-// public/docs/openapi.yaml; the server enforces roles, the approval workflow, audit and notifications.
+// Data source for the Django REST API. Cookie session auth; the server enforces roles,
+// the approval workflow, audit and notifications.
 
 const NOTIFICATION_POLL_MS = 15_000
 
@@ -18,28 +18,35 @@ const save = <T>(path: string, input: unknown, id?: string) => (id ? http.patch<
 export const djangoBackend: Backend = {
   auth: {
     async me() {
-      if (!hasSession()) return null
-      const { data } = await http.get<Profile>('/auth/me/')
-      return data
+      // Always probe the cookie session (flag alone is not enough after refresh)
+      const { data, error } = await http.get<Profile>('/auth/me/')
+      if (data) {
+        setSession(true, { quiet: true })
+        return data
+      }
+      if (error && hasSession()) setSession(false)
+      return null
     },
 
     onChange: onSessionChange,
 
     async signIn(email, password) {
-      const { data, error } = await request<{ access: string; refresh: string; user: Profile }>('POST', '/auth/login/', {
+      await ensureCsrf()
+      const { data, error } = await request<{ user: Profile }>('POST', '/auth/login/', {
         body: { email, password },
         auth: false,
       })
-      if (error || !data) return { data: null, error }
-      setTokens({ access: data.access, refresh: data.refresh })
+      if (error || !data?.user) return { data: null, error }
+      setSession(true)
       return { data: null, error: null }
     },
 
     async signOut() {
-      const refresh = refreshToken()
-      // Blacklists the refresh token; the local session is cleared even if the call fails
-      if (refresh) await http.post('/auth/logout/', { refresh })
-      setTokens(null)
+      try {
+        await http.post('/auth/logout/')
+      } finally {
+        setSession(false)
+      }
     },
 
     updateMe: (patch) => http.patch<Profile>('/auth/me/', patch),
@@ -61,6 +68,18 @@ export const djangoBackend: Backend = {
     remove: (id) => http.delete(`/departments/${id}/`),
   },
 
+  siteEmployees: {
+    list: (opts = {}) =>
+      list<SiteEmployee>('/site-employees/', {
+        department: opts.department,
+        is_active: opts.activeOnly === undefined ? undefined : opts.activeOnly,
+        search: opts.search,
+      }),
+    create: (input: SiteEmployeeInput) => http.post<SiteEmployee>('/site-employees/', input),
+    update: (id: string, patch: SiteEmployeePatch) => http.patch<SiteEmployee>(`/site-employees/${id}/`, patch),
+    remove: (id: string) => http.delete(`/site-employees/${id}/`),
+  },
+
   projects: {
     // spent_amount is always part of the payload
     list: (opts = {}) => list<Project>('/projects/', { ordering: 'name', is_active: opts.activeOnly ? true : undefined }),
@@ -71,7 +90,7 @@ export const djangoBackend: Backend = {
   vendors: {
     list: (opts = {}) => list<Vendor>('/vendors/', { ordering: 'name', is_active: opts.activeOnly ? true : undefined }),
     get: (id) => http.get<Vendor>(`/vendors/${id}/`),
-    save: (input, id) => save<Vendor>('/vendors/', input, id),
+    save: (input: VendorInput, id) => save<Vendor>('/vendors/', input, id),
     history: (id) => http.get<VendorHistory>(`/vendors/${id}/history/`),
   },
 
@@ -94,9 +113,7 @@ export const djangoBackend: Backend = {
     replaceItems: (id, items) => done(http.put(`/purchase-requests/${id}/items/`, items)),
     addQuotation: (requestId, quote) => done(http.post(`/purchase-requests/${requestId}/quotations/`, quote)),
     removeQuotation: (quoteId) => http.delete(`/quotations/${quoteId}/`),
-    // The server clears the other quotes on the request
     selectQuotation: (_requestId, quoteId) => done(http.post(`/quotations/${quoteId}/select/`)),
-
     submit: (id) => done(http.post(`/purchase-requests/${id}/submit/`)),
     decide: (id, decision, comment, approvedAmount) =>
       done(http.post(`/purchase-requests/${id}/decide/`, {
@@ -107,6 +124,7 @@ export const djangoBackend: Backend = {
     recordPurchase: (id, actualAmount) => done(http.post(`/purchase-requests/${id}/record-purchase/`, { actual_amount: actualAmount })),
     receive: (id, input: ReceiptInput) => done(http.post(`/purchase-requests/${id}/receive/`, input)),
     complete: (id) => done(http.post(`/purchase-requests/${id}/complete/`)),
+    updateReceivedItems: (id, items: ItemReceiptInput[]) => done(http.post(`/purchase-requests/${id}/receive/`, { items })),
   },
 
   attachments: {

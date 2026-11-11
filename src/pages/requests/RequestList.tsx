@@ -57,16 +57,18 @@ export function RequestList() {
     return () => window.removeEventListener(PURCHASE_SAVED_EVENT, load)
   }, [])
 
-  // Drafts stay private to their requester (and admins)
+  // Employees see only their own requests; drafts stay private to their requester (and admins)
+  const isShopkeeper = profile?.role === 'shopkeeper'
+  const shopkeeperFilters = FILTERS.filter((filter) => ['all', 'done'].includes(filter.key))
+  const filters = isShopkeeper ? shopkeeperFilters : FILTERS
   const scoped = requests.filter((r) => {
+    if (isShopkeeper) return ['purchased', 'partially_received', 'completed'].includes(r.status)
     const mine = r.requester_id === profile?.id
-    if (profile?.role === 'shopkeeper') return ['purchased', 'partially_received', 'completed'].includes(r.status)
+    if (profile?.role === 'site_engineer') return mine
     if (EDITABLE_STATUSES.includes(r.status)) return mine || profile?.role === 'admin'
     return true
   })
-  const isShopkeeper = profile?.role === 'shopkeeper'
-  const visibleFilters = isShopkeeper ? FILTERS.filter((f) => ['all', 'done'].includes(f.key)) : FILTERS
-  const filter = visibleFilters.find((f) => f.key === filterKey) ?? visibleFilters[0]
+  const filter = filters.find((f) => f.key === filterKey) ?? filters[0]
   const q = search.toLowerCase()
   const filtered = scoped.filter(
     (r) =>
@@ -83,7 +85,7 @@ export function RequestList() {
         count={filtered.length}
         subtitle={
           isShopkeeper
-            ? t('{n} delivery requests to track', { n: filtered.length })
+            ? `${filtered.filter((request) => request.status === 'purchased').length} in progress · ${filtered.filter((request) => request.status === 'completed').length} delivered`
             : `${formatCurrency(Math.round(total))} estimated across ${filtered.length} request${filtered.length === 1 ? '' : 's'}`
         }
       />
@@ -101,7 +103,7 @@ export function RequestList() {
           </button>
         )}
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
-          {visibleFilters.map((f) => (
+          {filters.map((f) => (
             <button key={f.key} className="chip focus-ring" aria-pressed={f.key === filter.key} onClick={() => setParam('status', f.key === 'all' ? null : f.key)}>
               {t(f.label)}
               <span className="text-xs opacity-60">{countFor(f)}</span>
@@ -155,7 +157,7 @@ export function RequestList() {
                       {due && <span className={due.late ? 'font-semibold text-[var(--accent)]' : ''}>· {due.text}</span>}
                     </p>
                   </div>
-                  <p className="order-last col-span-2 truncate text-sm text-[var(--ink-soft)] lg:order-none lg:col-span-1">{r.project?.name}</p>
+                  <p className="order-last col-span-2 truncate text-sm text-[var(--ink-soft)] lg:order-none lg:col-span-1">{(r.projects?.length ? r.projects.map((project) => project.name) : [r.project?.name]).filter(Boolean).join(', ')}</p>
                   {!isShopkeeper && <div className="hidden min-w-0 items-center gap-2.5 lg:flex">
                     {r.requester && <Avatar initials={r.requester.avatar_initials} index={r.requester.full_name.length} size={28} />}
                     <span className="truncate text-sm text-[var(--ink-soft)]">{r.requester?.full_name}</span>
