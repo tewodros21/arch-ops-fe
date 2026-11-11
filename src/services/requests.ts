@@ -92,7 +92,7 @@ export async function addQuotation(requestId: string, quote: QuoteInput): Promis
   const { error } = await backend.purchases.addQuotation(requestId, fields)
   if (error) return { error: error.message }
   if (file) {
-    const { error: fileError } = await attachFile(requestId, file, 'proforma', 'Vendor Proforma')
+    const { error: fileError } = await attachFile(requestId, file, 'proforma', 'Supplier Proforma')
     return { error: null, fileError }
   }
   return { error: null }

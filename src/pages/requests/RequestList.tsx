@@ -4,6 +4,7 @@ import { differenceInCalendarDays, format } from 'date-fns'
 import { ChevronRight, Inbox, Search, X } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { EDITABLE_STATUSES } from '@/lib/workflow'
+import { useT } from '@/lib/i18n'
 import { fetchPurchaseRequests, PURCHASE_SAVED_EVENT } from '@/services/requests'
 import { Avatar, PageHeader, StatusBadge } from '@/components/ui'
 import type { PurchaseRequest, RequestStatus } from '@/types'
@@ -30,6 +31,7 @@ function dueText(r: PurchaseRequest) {
 
 export function RequestList() {
   const { profile } = useAuth()
+  const t = useT()
   const [requests, setRequests] = useState<PurchaseRequest[]>([])
   const [loading, setLoading] = useState(true)
   // Search and status live in the URL so the topbar search and sidebar card can drive them
@@ -77,11 +79,11 @@ export function RequestList() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Purchase requests"
+        title={t('Purchase requests')}
         count={filtered.length}
         subtitle={
           isShopkeeper
-            ? `${filtered.length} delivery request${filtered.length === 1 ? '' : 's'} to track`
+            ? t('{n} delivery requests to track', { n: filtered.length })
             : `${formatCurrency(Math.round(total))} estimated across ${filtered.length} request${filtered.length === 1 ? '' : 's'}`
         }
       />
@@ -94,14 +96,14 @@ export function RequestList() {
             className="focus-ring inline-flex w-fit items-center gap-2 rounded-full bg-[var(--ink)] py-2 pr-3 pl-4 text-sm text-white"
           >
             <Search size={15} />
-            Results for “{search}”
+            {t('Results for “{q}”', { q: search })}
             <X size={15} className="opacity-70" />
           </button>
         )}
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
           {visibleFilters.map((f) => (
             <button key={f.key} className="chip focus-ring" aria-pressed={f.key === filter.key} onClick={() => setParam('status', f.key === 'all' ? null : f.key)}>
-              {f.label}
+              {t(f.label)}
               <span className="text-xs opacity-60">{countFor(f)}</span>
             </button>
           ))}
@@ -114,22 +116,22 @@ export function RequestList() {
             ? 'grid-cols-[minmax(0,2.2fr)_minmax(0,1.3fr)_7rem_8.5rem_1.5rem]'
             : 'grid-cols-[minmax(0,2.2fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_7rem_8.5rem_1.5rem]'
         }`}>
-          <span>Request</span>
-          <span>Project</span>
+          <span>{t('Request')}</span>
+          <span>{t('Project')}</span>
           {!isShopkeeper && <span>Requester</span>}
-          <span className="text-right">{isShopkeeper ? 'Delivery' : 'Amount'}</span>
-          <span>Status</span>
+          <span className="text-right">{isShopkeeper ? t('Delivery') : 'Amount'}</span>
+          <span>{t('Status')}</span>
           <span />
         </div>
 
-        {loading && <p className="px-6 py-16 text-center text-sm text-slate-500">Loading requests…</p>}
+        {loading && <p className="px-6 py-16 text-center text-sm text-slate-500">{t('Loading requests…')}</p>}
         {!loading && filtered.length === 0 && (
           <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--canvas)] text-slate-400">
               <Inbox size={24} />
             </span>
-            <p className="text-lg font-bold text-[var(--ink)]">Nothing here</p>
-            <p className="text-sm text-slate-500">No requests match this filter.</p>
+            <p className="text-lg font-bold text-[var(--ink)]">{t('Nothing here')}</p>
+            <p className="text-sm text-slate-500">{t('No requests match this filter.')}</p>
           </div>
         )}
 
@@ -159,7 +161,7 @@ export function RequestList() {
                     <span className="truncate text-sm text-[var(--ink-soft)]">{r.requester?.full_name}</span>
                   </div>}
                   <p className="text-right text-base font-bold text-[var(--ink)]">
-                    {isShopkeeper ? `${(r.items ?? []).filter((item) => Number(item.quantity_remaining ?? item.quantity) > 0).length} items remaining` : formatCurrency(Number(r.estimated_amount ?? 0))}
+                    {isShopkeeper ? t('{n} items remaining', { n: (r.items ?? []).filter((item) => Number(item.quantity_remaining ?? item.quantity) > 0).length }) : formatCurrency(Number(r.estimated_amount ?? 0))}
                   </p>
                   <div className="hidden lg:block">
                     <StatusBadge status={r.status} />

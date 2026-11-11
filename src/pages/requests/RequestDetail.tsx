@@ -2,8 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
-import { Check, Clock, FileText, PackageCheck, Paperclip, Pencil, RotateCcw, Send, ShieldCheck, Trash2, Upload, X as XIcon } from 'lucide-react'
+import { Check, Clock, FileText, PackageCheck, Paperclip, Pencil, ReceiptText, RotateCcw, Send, ShieldCheck, Trash2, Upload, X as XIcon } from 'lucide-react'
 import { notify } from '@/lib/notify'
+import { useT } from '@/lib/i18n'
 import { useAuth } from '@/context/AuthContext'
 import { Avatar, Breadcrumbs, Button, StatusBadge, useConfirm } from '@/components/ui'
 import {
@@ -25,7 +26,7 @@ import {
   PURCHASE_SAVED_EVENT,
   type PurchaseUnavailable,
 } from '@/services/requests'
-import { ATTACHMENT_TYPE_LABELS, ROLE_LABELS, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest } from '@/types'
+import { ATTACHMENT_TYPE_LABELS, PAYMENT_METHOD_LABELS, ROLE_LABELS, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest } from '@/types'
 import { formatCurrency } from '@/utils'
 
 export function RequestDetail() {
@@ -33,6 +34,7 @@ export function RequestDetail() {
   const { profile } = useAuth()
   const navigate = useNavigate()
   const confirm = useConfirm()
+  const t = useT()
   const [request, setRequest] = useState<PurchaseRequest | null>(null)
   const [unavailable, setUnavailable] = useState<PurchaseUnavailable | null>(null)
   const [unavailableMessage, setUnavailableMessage] = useState<string | null>(null)
@@ -46,6 +48,8 @@ export function RequestDetail() {
   const [uploadType, setUploadType] = useState<AttachmentType>('other')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
+  const [paymentReceipt, setPaymentReceipt] = useState<File | null>(null)
+  const [paymentReceiptBusy, setPaymentReceiptBusy] = useState(false)
 
   async function load() {
     if (!id) {
@@ -74,26 +78,26 @@ export function RequestDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  if (loading) return <p className="py-16 text-center text-sm text-slate-500">Loading request…</p>
+  if (loading) return <p className="py-16 text-center text-sm text-slate-500">{t('Loading request…')}</p>
   if (!request) {
     const title =
       unavailable === 'sent_back'
         ? 'This purchase was sent back'
         : unavailable === 'with_requester'
           ? 'This purchase is with the requester'
-          : 'Request not found'
+          : t('Request not found')
     const body =
       unavailable === 'sent_back'
         ? unavailableMessage || 'The requester can edit and resubmit. It will come back to Finance when they are ready.'
         : unavailable === 'with_requester'
           ? unavailableMessage || 'Only the requester can open it while it is a draft or waiting on Proforma changes.'
-          : 'This purchase request could not be opened.'
+          : t('This purchase request could not be opened.')
     return (
       <div className="rounded-[1.75rem] bg-white px-6 py-16 text-center">
         <p className="text-2xl font-black text-[var(--ink)]">{title}</p>
         <p className="mx-auto mt-3 max-w-md text-sm text-slate-500">{body}</p>
         <Link to="/requests" className="mt-5 inline-block text-sm font-medium text-[var(--accent)] underline underline-offset-4">
-          Back to requests
+          {t('Back to requests')}
         </Link>
       </div>
     )
@@ -111,6 +115,11 @@ export function RequestDetail() {
   const editable = isRequester && EDITABLE_STATUSES.includes(req.status)
   const canPurchase = role === 'finance'
   const canSetAmount = role === 'finance' && currentStage === 'finance'
+  const showPaymentReceipts = role === 'finance' && ['purchased', 'partially_received', 'completed'].includes(req.status)
+  const paymentReceipts = (req.attachments ?? []).filter((attachment) => attachment.attachment_type === 'receipt')
+  // Present only when the API lets this user see where the supplier gets paid (Finance, Admin, requester)
+  const seesPayment = req.supplier_account_number !== undefined
+  const paymentMethod = req.supplier_payment_method || null
   const hasProforma = !!(
     req.vendor_name?.trim() &&
     req.vendor_location?.trim() &&
@@ -277,12 +286,12 @@ export function RequestDetail() {
 
   async function handleComplete() {
     const ok = await confirm({
-      title: 'Mark as completed?',
-      body: 'All ordered item quantities have been received. This closes the request.',
-      confirmLabel: 'Mark completed',
+      title: t('Mark as completed?'),
+      body: t('All ordered item quantities have been received. This closes the request.'),
+      confirmLabel: t('Mark completed'),
       tone: 'accent',
     })
-    if (ok) await run('complete', () => completeRequest(req.id), 'Request marked as completed, all done here', 'Could not complete this request')
+    if (ok) await run('complete', () => completeRequest(req.id), t('Request marked as completed, all done here'), t('Could not complete this request'))
   }
 
   async function handleReceive() {
@@ -297,11 +306,11 @@ export function RequestDetail() {
         }]
       })
     if (!receiptItems.length || receiptItems.some((item) => !Number.isFinite(item.quantity_received) || item.quantity_received <= 0)) {
-      notify.warning('Enter a received quantity for at least one item')
+      notify.warning(t('Enter a received quantity for at least one item'))
       return
     }
     if (receiptItems.some((item) => item.quantity_received > item.quantity_remaining)) {
-      notify.warning('A received quantity cannot exceed the remaining quantity')
+      notify.warning(t('A received quantity cannot exceed the remaining quantity'))
       return
     }
     const saved = await run(
@@ -310,8 +319,8 @@ export function RequestDetail() {
         purchase_item_id: item.purchase_item_id,
         quantity_received: item.quantity_received,
       }))),
-      'Delivery quantities recorded',
-      'Could not record this delivery',
+      t('Delivery quantities recorded'),
+      t('Could not record this delivery'),
     )
     if (saved) setReceiptQuantities({})
   }
@@ -332,6 +341,22 @@ export function RequestDetail() {
     }
   }
 
+  async function handleUploadPaymentReceipt() {
+    if (!paymentReceipt) {
+      notify.warning('Choose a receipt, screenshot or PDF first')
+      return
+    }
+    setPaymentReceiptBusy(true)
+    const { error } = await attachFile(req.id, paymentReceipt, 'receipt', 'Payment receipt')
+    setPaymentReceiptBusy(false)
+    if (error) notify.error(`Could not upload the receipt: ${error}`)
+    else {
+      notify.success('Receipt attached to this request')
+      setPaymentReceipt(null)
+      load()
+    }
+  }
+
   async function handleOpenDocument(a: PurchaseAttachment) {
     const { error } = await openAttachment(a)
     if (error) notify.error(`Could not open this file: ${error}`)
@@ -341,8 +366,8 @@ export function RequestDetail() {
     <div className="space-y-4">
       <Breadcrumbs
         items={[
-          { label: 'Overview', to: '/dashboard' },
-          { label: 'Purchase requests', to: '/requests' },
+          { label: t('Overview'), to: '/dashboard' },
+          { label: t('Purchase requests'), to: '/requests' },
           { label: req.request_number },
         ]}
       />
@@ -424,21 +449,21 @@ export function RequestDetail() {
           )}
 
           <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
-            <SectionTitle title="Items" count={items.length} />
+            <SectionTitle title={t('Items')} count={items.length} />
             {items.length === 0 ? (
-              <p className="text-sm text-slate-500">No line items listed.</p>
+              <p className="text-sm text-slate-500">{t('No line items listed.')}</p>
             ) : (
               <>
                 <div className={clsx(
                   'hidden gap-3 px-4 pb-2 text-xs font-medium tracking-wide text-slate-500 uppercase sm:grid',
                   isShopkeeper ? 'grid-cols-[minmax(0,1fr)_7rem_7rem_9rem]' : 'grid-cols-[minmax(0,1fr)_6rem_7rem_7rem]',
                 )}>
-                  <span>Item</span>
+                  <span>{t('Item')}</span>
                   {isShopkeeper ? (
                     <>
-                      <span className="text-right">Received</span>
-                      <span className="text-right">Remaining</span>
-                      <span className="text-right">Receive now</span>
+                      <span className="text-right">{t('Received')}</span>
+                      <span className="text-right">{t('Remaining')}</span>
+                      <span className="text-right">{t('Receive now')}</span>
                     </>
                   ) : (
                     <>
@@ -472,17 +497,17 @@ export function RequestDetail() {
                         {isShopkeeper ? (
                           <>
                             <span className="text-right text-sm text-[var(--ink-soft)]">
-                              <span className="block text-[10px] uppercase text-slate-400 sm:hidden">Received</span>
+                              <span className="block text-[10px] uppercase text-slate-400 sm:hidden">{t('Received')}</span>
                               {received.toLocaleString()} {item.unit}
                             </span>
                             <span className="text-right text-sm font-semibold text-[var(--ink)]">
-                              <span className="block text-[10px] uppercase text-slate-400 sm:hidden">Remaining</span>
+                              <span className="block text-[10px] uppercase text-slate-400 sm:hidden">{t('Remaining')}</span>
                               {remaining.toLocaleString()} {item.unit}
                             </span>
                             <div>
-                              <span className="block text-[10px] uppercase text-slate-400 sm:hidden">Receive now</span>
+                              <span className="block text-[10px] uppercase text-slate-400 sm:hidden">{t('Receive now')}</span>
                               <input
-                                aria-label={`Quantity received now for ${item.name}`}
+                                aria-label={t('Quantity received now for {name}', { name: item.name })}
                                 type="number"
                                 min="0"
                                 max={remaining}
@@ -522,21 +547,34 @@ export function RequestDetail() {
               <div className="mt-5 border-t border-black/[0.06] pt-4">
                 <Button onClick={handleReceive} loading={busy === 'receive'} className="w-full sm:w-auto">
                   <PackageCheck size={17} />
-                  Record received quantities
+                  {t('Record received quantities')}
                 </Button>
               </div>
             )}
           </section>
 
           <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
-            <SectionTitle title="Vendor & Proforma" />
+            <SectionTitle title={isShopkeeper ? t('Supplier') : 'Supplier & Proforma'} />
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Meta label="Vendor">{req.vendor_name || 'Not provided'}</Meta>
-              <Meta label="Vendor location">{req.vendor_location || 'Not provided'}</Meta>
+              <Meta label={t('Supplier')}>{req.vendor_name || t('Not provided')}</Meta>
+              <Meta label={t('Supplier location')}>{req.vendor_location || t('Not provided')}</Meta>
               {!isShopkeeper && req.proforma_amount != null && (
                 <Meta label="Proforma amount">{formatCurrency(req.proforma_amount)}</Meta>
               )}
             </div>
+            {seesPayment && !isShopkeeper && (
+              <div className="mt-4 grid grid-cols-1 gap-4 rounded-2xl bg-[var(--canvas)] p-4 sm:grid-cols-3">
+                <Meta label="Pay by">{paymentMethod ? PAYMENT_METHOD_LABELS[paymentMethod] : 'Not provided'}</Meta>
+                {paymentMethod === 'bank' && <Meta label="Bank">{req.supplier_bank_name || 'Not provided'}</Meta>}
+                <Meta label={paymentMethod === 'telebirr' ? 'Telebirr number' : 'Account number'}>
+                  {req.supplier_account_number ? (
+                    <span className="font-mono tracking-wide select-all">{req.supplier_account_number}</span>
+                  ) : (
+                    'Not provided'
+                  )}
+                </Meta>
+              </div>
+            )}
             {!isShopkeeper && req.attachments?.some((attachment) => attachment.attachment_type === 'proforma') && (
               <div className="mt-4 border-t border-black/[0.06] pt-4">
                 {req.attachments
@@ -587,7 +625,7 @@ export function RequestDetail() {
             </div>
 
             <div className="mt-4 flex flex-col gap-2 border-t border-black/[0.06] pt-4 sm:flex-row">
-              <select value={uploadType} onChange={(e) => setUploadType(e.target.value as AttachmentType)} className="field h-11 !py-0 sm:w-44">
+              <select aria-label="Document type" value={uploadType} onChange={(e) => setUploadType(e.target.value as AttachmentType)} className="field h-11 !py-0 sm:w-44">
                 {Object.entries(ATTACHMENT_TYPE_LABELS).map(([value, label]) => (
                   <option key={value} value={value}>{label}</option>
                 ))}
@@ -612,7 +650,7 @@ export function RequestDetail() {
                 <p className="mt-3 text-2xl leading-tight font-black text-white">Ready to submit?</p>
                 <p className="mt-1 text-sm text-white/60">
                   {!hasProforma
-                    ? 'Complete vendor details and attach the Proforma before submitting for review.'
+                    ? 'Complete supplier details and attach the Proforma before submitting for review.'
                     : role === 'project_manager'
                       ? 'Finance reviews this request after you submit it.'
                       : 'Submit this request to the assigned Project Manager. Project Manager requests go directly to Finance.'}
@@ -703,12 +741,50 @@ export function RequestDetail() {
             </section>
           )}
 
+          {showPaymentReceipts && (
+            <section className="rounded-[1.75rem] bg-white p-6">
+              <SectionTitle title="Payment receipts" count={paymentReceipts.length} />
+              <p className="mb-3 text-sm text-[var(--ink-soft)]">
+                Attach the bank slip, Telebirr screenshot or receipt PDF for this payment.
+              </p>
+              {paymentReceipts.length > 0 && (
+                <ul className="mb-3 space-y-2">
+                  {paymentReceipts.map((attachment) => (
+                    <li key={attachment.id}>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDocument(attachment)}
+                        className="focus-ring flex w-full items-center gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3 text-left transition-colors hover:bg-[#ebe7e2]"
+                      >
+                        <ReceiptText size={17} className="shrink-0 text-[var(--accent)]" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-[var(--ink)]">{attachment.file_name}</span>
+                          <span className="block truncate text-xs text-slate-500">
+                            {format(new Date(attachment.uploaded_at), 'MMM d, yyyy')}
+                            {attachment.file_size ? ` · ${formatBytes(attachment.file_size)}` : ''}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="space-y-2">
+                <FilePick file={paymentReceipt} onFile={pickFile(setPaymentReceipt)} label="Choose a receipt, screenshot or PDF" />
+                <Button variant="outline" onClick={handleUploadPaymentReceipt} loading={paymentReceiptBusy} className="w-full">
+                  <Upload size={16} />
+                  Upload receipt
+                </Button>
+              </div>
+            </section>
+          )}
+
           {canComplete && (
             <section className="rounded-[1.75rem] bg-white p-6">
-              <SectionTitle title="Close it out" />
-              <p className="mb-4 text-sm text-[var(--ink-soft)]">All item quantities are received. Mark the request complete.</p>
+              <SectionTitle title={t('Close it out')} />
+              <p className="mb-4 text-sm text-[var(--ink-soft)]">{t('All item quantities are received. Mark the request complete.')}</p>
               <Button onClick={handleComplete} loading={busy === 'complete'} className="w-full">
-                Mark as completed
+                {t('Mark as completed')}
               </Button>
             </section>
           )}

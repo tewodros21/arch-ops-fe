@@ -10,6 +10,7 @@ import type {
   PurchaseRequest,
   RequestStatus,
   Role,
+  SupplierPaymentMethod,
   Vendor,
   VendorQuotation,
 } from '@/types'
@@ -47,6 +48,9 @@ export interface RequestInput {
   vendor_name: string
   vendor_location: string
   proforma_amount: number | null
+  supplier_payment_method: SupplierPaymentMethod | ''
+  supplier_bank_name: string
+  supplier_account_number: string
   estimated_amount: number
   justification: string
   required_date: string | null

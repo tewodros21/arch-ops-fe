@@ -18,7 +18,7 @@ import {
   updatePurchaseRequest,
   type RequestInput,
 } from '@/services/requests'
-import type { Project } from '@/types'
+import { PAYMENT_METHOD_LABELS, type Project, type SupplierPaymentMethod } from '@/types'
 
 interface ItemRow {
   name: string
@@ -40,7 +40,7 @@ const STEPS: Step[] = [
   { title: 'Details', hint: 'What you need and for which project' },
   { title: 'Items', hint: 'Line items and quantities' },
   { title: 'Cost & timing', hint: 'Estimate, due date and why' },
-  { title: 'Vendor & Proforma', hint: 'Vendor details and optional Proforma document' },
+  { title: 'Supplier & Proforma', hint: 'Supplier, payment details and optional Proforma' },
   { title: 'Review', hint: 'Save a draft or submit' },
 ]
 
@@ -80,6 +80,9 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     vendor_name: '',
     vendor_location: '',
     proforma_amount: '',
+    supplier_payment_method: '' as SupplierPaymentMethod | '',
+    supplier_bank_name: '',
+    supplier_account_number: '',
     estimated_amount: '',
     justification: '',
     required_date: '',
@@ -129,6 +132,9 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         vendor_name: r.vendor_name ?? r.quotations?.[0]?.vendor?.name ?? '',
         vendor_location: r.vendor_location ?? r.quotations?.[0]?.vendor?.address ?? '',
         proforma_amount: String(r.proforma_amount ?? r.quotations?.[0]?.amount ?? ''),
+        supplier_payment_method: r.supplier_payment_method ?? '',
+        supplier_bank_name: r.supplier_bank_name ?? '',
+        supplier_account_number: r.supplier_account_number ?? '',
         estimated_amount: String(r.estimated_amount ?? ''),
         justification: r.justification ?? '',
         required_date: r.required_date ?? '',
@@ -171,6 +177,14 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     Number(form.proforma_amount) > 0
   )
 
+  const accountDigits = form.supplier_account_number.replace(/\D/g, '')
+  const paymentError =
+    form.supplier_account_number.trim() && !/^[\d\s+-]+$/.test(form.supplier_account_number.trim())
+      ? 'Use digits only for the account or Telebirr number'
+      : form.supplier_payment_method === 'telebirr' && accountDigits && (accountDigits.length < 9 || accountDigits.length > 12)
+        ? 'Enter a valid Telebirr phone number, e.g. 0912345678'
+        : null
+
   const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || (r.unit_price !== '' && Number(r.unit_price) < 0))
   const projectError = loadingProjects
     ? 'Projects are still loading. Please wait a moment.'
@@ -184,7 +198,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     0: !form.title.trim() ? 'Add a short title for this request' : !form.project_id ? projectError : null,
     1: badItem ? 'Each item needs a name and a quantity' : null,
     2: !(estimate > 0) ? 'Enter an estimated amount to continue' : null,
-    3: null,
+    3: paymentError,
     4: null,
   }
 
@@ -224,7 +238,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     if (submitAfter && !hasVendorDetails) {
       setShowErrors(true)
       setStep(3)
-      notify.warning('Enter the vendor name, location, and a Proforma amount greater than zero')
+      notify.warning('Enter the supplier name, location, and a Proforma amount greater than zero')
       return
     }
     setBusy(true)
@@ -236,6 +250,9 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       vendor_name: form.vendor_name.trim(),
       vendor_location: form.vendor_location.trim(),
       proforma_amount: form.proforma_amount ? Number(form.proforma_amount) : null,
+      supplier_payment_method: form.supplier_account_number.trim() ? form.supplier_payment_method : '',
+      supplier_bank_name: form.supplier_payment_method === 'bank' ? form.supplier_bank_name.trim() : '',
+      supplier_account_number: form.supplier_payment_method ? form.supplier_account_number.trim() : '',
       estimated_amount: estimate,
       justification: form.justification.trim(),
       required_date: form.required_date || null,
@@ -273,7 +290,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     if (itemsError) notify.warning(`Line items were not saved: ${itemsError}`)
 
     if (proformaFile) {
-      const { error } = await attachFile(requestId, proformaFile, 'proforma', 'Vendor Proforma')
+      const { error } = await attachFile(requestId, proformaFile, 'proforma', 'Supplier Proforma')
       if (error) {
         setBusy(false)
         notify.error(`Request saved, but the Proforma could not be uploaded: ${error}`)
@@ -294,7 +311,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       }
       else notify.success('Request submitted for Finance review')
     } else {
-      notify.success(editing ? 'Draft changes saved' : 'Draft saved, complete the vendor details before submitting')
+      notify.success(editing ? 'Draft changes saved' : 'Draft saved, complete the supplier details before submitting')
     }
 
     setBusy(false)
@@ -608,7 +625,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             Enter the supplier details and Proforma amount. Attaching the Proforma document is optional.
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Vendor name">
+            <Field label="Supplier name">
               <input
                 value={form.vendor_name}
                 onChange={(e) => update('vendor_name', e.target.value)}
@@ -616,7 +633,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 className={clsx(inputClass, 'border-transparent')}
               />
             </Field>
-            <Field label="Vendor location">
+            <Field label="Supplier location">
               <input
                 value={form.vendor_location}
                 onChange={(e) => update('vendor_location', e.target.value)}
@@ -636,6 +653,50 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               placeholder="Amount shown on the Proforma"
               className={clsx(inputClass, 'border-transparent')}
             />
+          </Field>
+          <Field label="Payment details for Finance" optional>
+            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Payment method">
+              {(Object.keys(PAYMENT_METHOD_LABELS) as SupplierPaymentMethod[]).map((method) => {
+                const active = form.supplier_payment_method === method
+                return (
+                  <button
+                    key={method}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => update('supplier_payment_method', active ? '' : method)}
+                    className={clsx(
+                      'focus-ring rounded-2xl border px-4 py-3 text-sm font-medium transition-colors',
+                      active ? 'border-[var(--ink)] bg-[var(--ink)] text-white' : 'border-black/10 text-[var(--ink)] hover:border-black/30',
+                    )}
+                  >
+                    {PAYMENT_METHOD_LABELS[method]}
+                  </button>
+                )
+              })}
+            </div>
+            {form.supplier_payment_method && (
+              <div className={clsx('mt-2 grid grid-cols-1 gap-2', form.supplier_payment_method === 'bank' && 'sm:grid-cols-2')}>
+                {form.supplier_payment_method === 'bank' && (
+                  <input
+                    value={form.supplier_bank_name}
+                    onChange={(e) => update('supplier_bank_name', e.target.value)}
+                    placeholder="Bank name, e.g. CBE"
+                    aria-label="Bank name"
+                    className={clsx(inputClass, 'border-transparent')}
+                  />
+                )}
+                <input
+                  value={form.supplier_account_number}
+                  onChange={(e) => update('supplier_account_number', e.target.value)}
+                  inputMode="numeric"
+                  placeholder={form.supplier_payment_method === 'bank' ? 'Account number' : 'Telebirr phone number, e.g. 0912345678'}
+                  aria-label={form.supplier_payment_method === 'bank' ? 'Account number' : 'Telebirr number'}
+                  className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
+                />
+              </div>
+            )}
+            {err(3, !!paymentError) && <p className="mt-2 text-xs font-medium text-[var(--accent)]">{paymentError}</p>}
+            <p className="mt-2 text-xs text-slate-500">Only Finance and Admin can see these details. Finance uses them to transfer the payment.</p>
           </Field>
           {existingProforma && !proformaFile && (
             <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
@@ -674,7 +735,16 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               onEdit={() => setStep(2)}
             />
             <ReviewTile
-              label="Vendor / Proforma"
+              label="Pay to"
+              value={
+                form.supplier_payment_method && form.supplier_account_number.trim()
+                  ? `${PAYMENT_METHOD_LABELS[form.supplier_payment_method]} · ${form.supplier_account_number.trim()}`
+                  : 'Not provided'
+              }
+              onEdit={() => setStep(3)}
+            />
+            <ReviewTile
+              label="Supplier / Proforma"
               value={hasVendorDetails ? `${form.vendor_name} · ${money(form.proforma_amount)}` : 'Incomplete'}
               onEdit={() => setStep(3)}
             />
@@ -712,9 +782,9 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 <Info size={16} />
               </span>
               <span>
-                Add the vendor name, location, and Proforma amount to submit. The document is optional.{' '}
+                Add the supplier name, location, and Proforma amount to submit. The document is optional.{' '}
                 <button type="button" onClick={() => setStep(3)} className="font-semibold underline underline-offset-2">
-                  Complete vendor details
+                  Complete supplier details
                 </button>{' '}
                 or save this as a draft for now.
               </span>

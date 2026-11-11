@@ -1,10 +1,10 @@
-import type { Role, RequestStatus, AttachmentType, LaborStatus } from '@/types'
+import type { Role, RequestStatus, AttachmentType, LaborStatus, SupplierPaymentMethod } from '@/types'
 
 export const ROLE_LABELS: Record<Role, string> = {
   ceo: 'CEO',
   project_manager: 'Project Manager',
   site_engineer: 'Site Engineer',
-  shopkeeper: 'Shopkeeper',
+  shopkeeper: 'Store Keeper',
   finance: 'Finance',
   admin: 'Administrator',
 }
@@ -40,6 +40,11 @@ export const ATTACHMENT_TYPE_LABELS: Record<AttachmentType, string> = {
   delivery: 'Delivery Document',
   photo: 'Photo',
   other: 'Other',
+}
+
+export const PAYMENT_METHOD_LABELS: Record<SupplierPaymentMethod, string> = {
+  bank: 'Bank account',
+  telebirr: 'Telebirr',
 }
 
 export const LABOR_STATUS_LABELS: Record<LaborStatus, string> = {

@@ -66,7 +66,7 @@ html {
 
 body {
   margin: 0;
-  font-family: 'Onest', 'Inter', system-ui, -apple-system, sans-serif;
+  font-family: 'Onest', 'Inter', 'Noto Sans Ethiopic', system-ui, -apple-system, sans-serif;
   color: #4a4440;
   background: #f3f1ee;
   -webkit-font-smoothing: antialiased;
@@ -79,7 +79,7 @@ body {
   h2,
   h3,
   h4 {
-    font-family: 'Inter Tight', 'Inter', sans-serif;
+    font-family: 'Inter Tight', 'Inter', 'Noto Sans Ethiopic', sans-serif;
     color: var(--ink);
     letter-spacing: -0.02em;
     margin: 0;
@@ -180,14 +180,14 @@ body {
   --gold-600: #d8961b;
   --glass-border: rgba(24, 20, 18, 0.08);
 
-  font-family: 'Onest', 'Inter', system-ui, sans-serif;
+  font-family: 'Onest', 'Inter', 'Noto Sans Ethiopic', system-ui, sans-serif;
   background: var(--canvas);
   color: var(--ink-soft);
 }
 
 @layer base {
   .app-shell :is(h1, h2, h3, h4) {
-    font-family: 'Onest', 'Inter', sans-serif;
+    font-family: 'Onest', 'Inter', 'Noto Sans Ethiopic', sans-serif;
     letter-spacing: -0.015em;
   }
 }

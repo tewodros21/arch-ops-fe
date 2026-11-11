@@ -8,6 +8,7 @@ import { Avatar } from '@/components/ui'
 import { notify } from '@/lib/notify'
 import { USER_CREATED_EVENT } from '@/constants'
 import { ROLE_LABELS, type Profile } from '@/types'
+import { useT } from '@/lib/i18n'
 import { navFor } from './nav'
 
 interface SidebarProps {
@@ -48,6 +49,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen, onClose }: SidebarPro
 function SidebarPanel({ collapsed, onToggle, onClose }: { collapsed: boolean; onToggle?: () => void; onClose?: () => void }) {
   const { profile, signOut } = useAuth()
   const navigate = useNavigate()
+  const t = useT()
   const [team, setTeam] = useState<Profile[]>([])
   const [teamExpanded, setTeamExpanded] = useState(false)
 
@@ -119,8 +121,8 @@ function SidebarPanel({ collapsed, onToggle, onClose }: { collapsed: boolean; on
               to={item.to}
               end={item.to === '/dashboard'}
               onClick={onClose}
-              title={collapsed ? item.label : undefined}
-              aria-label={collapsed ? item.label : undefined}
+              title={collapsed ? t(item.label) : undefined}
+              aria-label={collapsed ? t(item.label) : undefined}
               className={({ isActive }) =>
                 clsx(
                   'focus-ring flex items-center gap-3 rounded-2xl py-2.5 text-sm transition-colors',
@@ -130,7 +132,7 @@ function SidebarPanel({ collapsed, onToggle, onClose }: { collapsed: boolean; on
               }
             >
               <item.icon size={18} strokeWidth={1.6} className="shrink-0" />
-              {!collapsed && item.label}
+              {!collapsed && t(item.label)}
             </NavLink>
           ))}
         </nav>
@@ -186,7 +188,7 @@ function SidebarPanel({ collapsed, onToggle, onClose }: { collapsed: boolean; on
             {!collapsed && (
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm text-white">{profile.full_name}</p>
-                <p className="truncate text-xs text-white/45">{ROLE_LABELS[profile.role]}</p>
+                <p className="truncate text-xs text-white/45">{t(ROLE_LABELS[profile.role])}</p>
               </div>
             )}
           </Link>

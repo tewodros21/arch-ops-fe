@@ -2,7 +2,7 @@ import { differenceInCalendarDays, differenceInHours } from 'date-fns'
 import type { PurchaseRequest, RequestStatus } from '@/types'
 import { formatCurrency } from '@/utils'
 
-export const COLORS = { ink: '#181412', sun: '#f6b73c', accent: '#e4532d', stone: '#8a7f78', sand: '#e6e1da' }
+export const COLORS = { ink: '#181412', sun: '#f6b73c', accent: '#e4532d', stone: '#8a7f78', sand: '#e6e1da', tan: '#b39a7f' }
 
 export const IN_REVIEW: RequestStatus[] = ['awaiting_pm', 'awaiting_finance']
 export const DONE: RequestStatus[] = ['approved', 'purchased', 'partially_received', 'completed']

@@ -12,12 +12,12 @@ const WORKFLOW = ['Request', 'Proforma', 'Project Manager', 'Finance', 'Purchase
 const STAGES = [
   { n: '01', title: 'Project Manager', body: 'Reviews requests for assigned projects. A Project Manager’s own requests go straight to Finance.' },
   { n: '02', title: 'Finance', body: 'Reviews the request, approves the amount, and records the purchase.' },
-  { n: '03', title: 'Shopkeeper', body: 'Records deliveries by item and quantity, including partial receipts, without seeing financial details.' },
+  { n: '03', title: 'Store Keeper', body: 'Records deliveries by item and quantity, including partial receipts, without seeing financial details.' },
 ]
 
 // Role cards: drop cut-out PNGs (transparent background) into public/assets/roles/
 const ROLES: { role: Role; blurb: string; bg: string; fg: string }[] = [
-  { role: 'site_engineer', blurb: 'Creates project purchase requests with items, quantities, estimates and a vendor Proforma.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
+  { role: 'site_engineer', blurb: 'Creates project purchase requests with items, quantities, estimates and a supplier Proforma.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
   { role: 'project_manager', blurb: 'Reviews requests for assigned projects before they go to Finance.', bg: 'var(--sun)', fg: 'var(--ink)' },
   { role: 'finance', blurb: 'Reviews pricing, approves the spend and records the purchase.', bg: 'var(--accent)', fg: '#ffffff' },
   { role: 'shopkeeper', blurb: 'Tracks item deliveries and records full or partial quantities received.', bg: 'var(--panel-dark)', fg: '#ffffff' },

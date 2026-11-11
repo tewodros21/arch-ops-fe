@@ -13,6 +13,8 @@ import { RangeSelect } from '@/components/dashboard/kit'
 import { COLORS, DONE, IN_REVIEW, isOverdue, money } from '@/components/dashboard/metrics'
 import { formatDuration } from '@/services/labor'
 import { notify } from '@/lib/notify'
+import { useT } from '@/lib/i18n'
+import { LanguageSwitch } from '@/components/ui/LanguageSwitch'
 import {
   LABOR_STATUS_LABELS,
   ROLE_LABELS,
@@ -78,6 +80,7 @@ function dueLabel(date: string | null) {
 
 export function Dashboard() {
   const { profile } = useAuth()
+  const t = useT()
   const [requests, setRequests] = useState<PurchaseRequest[]>([])
   const [labor, setLabor] = useState<LaborRequest[]>([])
   const [activity, setActivity] = useState<AuditEvent[]>([])
@@ -121,20 +124,23 @@ export function Dashboard() {
     return (
       <div className="space-y-5">
         <section className="panel-dark rounded-[1.75rem] p-6 text-white sm:p-8">
-          <p className="text-sm text-white/60">Shopkeeper workspace</p>
-          <h1 className="mt-2 text-3xl font-black">Delivery tracking</h1>
-          <p className="mt-2 text-sm text-white/70">Record deliveries by item quantity. Financial details are hidden.</p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <p className="text-sm text-white/60">{t('Store Keeper workspace')}</p>
+            <LanguageSwitch />
+          </div>
+          <h1 className="mt-2 text-3xl font-black">{t('Delivery tracking')}</h1>
+          <p className="mt-2 text-sm text-white/70">{t('Record deliveries by item quantity. Financial details are hidden.')}</p>
           <p className="mt-5 text-4xl font-black">{loading ? '–' : deliveries.filter((r) => r.status !== 'completed').length}</p>
-          <p className="text-xs text-white/60">open delivery requests</p>
+          <p className="text-xs text-white/60">{t('open delivery requests')}</p>
         </section>
         <section className="space-y-3">
           <div className="flex items-center justify-between px-1">
-            <h2 className="text-2xl font-normal text-[var(--ink)]">Requests to receive</h2>
-            <span className="text-sm text-slate-500">{deliveries.length} total</span>
+            <h2 className="text-2xl font-normal text-[var(--ink)]">{t('Requests to receive')}</h2>
+            <span className="text-sm text-slate-500">{t('{n} total', { n: deliveries.length })}</span>
           </div>
-          {loading && <p className="rounded-2xl bg-white p-6 text-sm text-slate-500">Loading delivery requests…</p>}
+          {loading && <p className="rounded-2xl bg-white p-6 text-sm text-slate-500">{t('Loading delivery requests…')}</p>}
           {!loading && deliveries.length === 0 && (
-            <p className="rounded-[1.5rem] bg-white p-8 text-center text-sm text-slate-500">No purchased requests are waiting for delivery.</p>
+            <p className="rounded-[1.5rem] bg-white p-8 text-center text-sm text-slate-500">{t('No purchased requests are waiting for delivery.')}</p>
           )}
           {deliveries.map((request) => (
             <Link
@@ -156,13 +162,13 @@ export function Dashboard() {
                     <span className="ml-2">{Number(item.received_quantity ?? 0).toLocaleString()} / {Number(item.quantity).toLocaleString()} {item.unit}</span>
                     {Number(item.quantity_remaining ?? item.quantity) > 0 && (
                       <span className="ml-2 text-[var(--accent)]">
-                        · {Number(item.quantity_remaining ?? item.quantity).toLocaleString()} remaining
+                        · {t('{n} remaining', { n: Number(item.quantity_remaining ?? item.quantity).toLocaleString() })}
                       </span>
                     )}
                   </p>
                 ))}
               </div>
-              <p className="mt-4 text-sm font-semibold text-[var(--accent)]">Open delivery details →</p>
+              <p className="mt-4 text-sm font-semibold text-[var(--accent)]">{t('Open delivery details →')}</p>
             </Link>
           ))}
         </section>

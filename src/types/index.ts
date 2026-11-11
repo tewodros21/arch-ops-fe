@@ -99,6 +99,8 @@ export interface Approval {
   decided_at: string | null
 }
 
+export type SupplierPaymentMethod = 'bank' | 'telebirr'
+
 export type AttachmentType = 'proforma' | 'invoice' | 'receipt' | 'delivery' | 'photo' | 'other'
 
 export interface PurchaseAttachment {
@@ -126,6 +128,10 @@ export interface PurchaseRequest {
   vendor_name?: string
   vendor_location?: string
   proforma_amount?: number | null
+  /** Only sent to Finance, Admin and the requester */
+  supplier_payment_method?: SupplierPaymentMethod | ''
+  supplier_bank_name?: string
+  supplier_account_number?: string
   requester_id?: string
   requester?: Profile
   required_date?: string | null
