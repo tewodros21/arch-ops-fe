@@ -16,11 +16,12 @@ const STAGES = [
 ]
 
 // Role cards: drop cut-out PNGs (transparent background) into public/assets/roles/
+// Store Keeper is left out until public/assets/roles/shopkeeper.png exists; add it back with
+// { role: 'shopkeeper', blurb: 'Tracks item deliveries and records full or partial quantities received.', bg: 'var(--panel-dark)', fg: '#ffffff' }
 const ROLES: { role: Role; blurb: string; bg: string; fg: string }[] = [
   { role: 'site_engineer', blurb: 'Creates project purchase requests with items, quantities, estimates and a supplier Proforma.', bg: 'var(--accent-soft)', fg: 'var(--ink)' },
   { role: 'project_manager', blurb: 'Reviews requests for assigned projects before they go to Finance.', bg: 'var(--sun)', fg: 'var(--ink)' },
   { role: 'finance', blurb: 'Reviews pricing, approves the spend and records the purchase.', bg: 'var(--accent)', fg: '#ffffff' },
-  { role: 'shopkeeper', blurb: 'Tracks item deliveries and records full or partial quantities received.', bg: 'var(--panel-dark)', fg: '#ffffff' },
   { role: 'ceo', blurb: 'Creates requests and gets visibility across project purchasing.', bg: '#d9e8e4', fg: 'var(--ink)' },
   { role: 'admin', blurb: 'Runs users, projects and the rules the workflow follows.', bg: '#e6e1da', fg: 'var(--ink)' },
 ]
@@ -237,7 +238,7 @@ export function Home() {
             <p className="max-w-xs text-sm text-[var(--ink-soft)]">Each role sees exactly what's waiting on them, and nothing they shouldn't.</p>
           </div>
 
-          <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {ROLES.map((r) => (
               <article
                 key={r.role}
