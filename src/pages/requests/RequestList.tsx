@@ -8,7 +8,7 @@ import { useT } from '@/lib/i18n'
 import { fetchPurchaseRequests, PURCHASE_SAVED_EVENT } from '@/services/requests'
 import { Avatar, PageHeader, StatusBadge } from '@/components/ui'
 import type { PurchaseRequest, RequestStatus } from '@/types'
-import { formatCurrency } from '@/utils'
+import { formatCurrency, projectLabel } from '@/utils'
 
 const FILTERS: { key: string; label: string; statuses: RequestStatus[] | null }[] = [
   { key: 'all', label: 'All', statuses: null },
@@ -71,7 +71,7 @@ export function RequestList() {
   const filtered = scoped.filter(
     (r) =>
       (!filter.statuses || filter.statuses.includes(r.status)) &&
-      (!q || r.title.toLowerCase().includes(q) || r.request_number.toLowerCase().includes(q) || r.project?.name.toLowerCase().includes(q)),
+      (!q || r.title.toLowerCase().includes(q) || r.request_number.toLowerCase().includes(q) || (r.projects ?? (r.project ? [r.project] : [])).some((p) => p.name.toLowerCase().includes(q))),
   )
   const countFor = (f: (typeof FILTERS)[number]) => scoped.filter((r) => !f.statuses || f.statuses.includes(r.status)).length
   const total = filtered.reduce((sum, r) => sum + Number(r.estimated_amount ?? 0), 0)
@@ -155,7 +155,7 @@ export function RequestList() {
                       {due && <span className={due.late ? 'font-semibold text-[var(--accent)]' : ''}>· {due.text}</span>}
                     </p>
                   </div>
-                  <p className="order-last col-span-2 truncate text-sm text-[var(--ink-soft)] lg:order-none lg:col-span-1">{r.project?.name}</p>
+                  <p className="order-last col-span-2 truncate text-sm text-[var(--ink-soft)] lg:order-none lg:col-span-1">{projectLabel(r)}</p>
                   {!isShopkeeper && <div className="hidden min-w-0 items-center gap-2.5 lg:flex">
                     {r.requester && <Avatar initials={r.requester.avatar_initials} index={r.requester.full_name.length} size={28} />}
                     <span className="truncate text-sm text-[var(--ink-soft)]">{r.requester?.full_name}</span>

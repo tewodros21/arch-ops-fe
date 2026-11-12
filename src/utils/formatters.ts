@@ -36,3 +36,10 @@ export function getInitials(name: string): string {
     .map((n) => n[0].toUpperCase())
     .join('')
 }
+
+/** "Lobby" for a single-project request, "Lobby +1" when it also buys for other projects */
+export function projectLabel(request: { project?: { name: string } | null; projects?: { name: string }[] }) {
+  const name = request.project?.name ?? request.projects?.[0]?.name ?? ''
+  const extra = (request.projects?.length ?? 1) - 1
+  return extra > 0 ? `${name} +${extra}` : name
+}

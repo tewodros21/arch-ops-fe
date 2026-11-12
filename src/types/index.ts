@@ -67,6 +67,8 @@ export interface Vendor {
 export interface PurchaseItem {
   id: string
   purchase_request_id: string
+  /** Which of the request's projects this line is for */
+  project_id?: string
   name: string
   description?: string | null
   quantity: number
@@ -124,6 +126,11 @@ export interface PurchaseRequest {
   description?: string
   project_id: string
   project?: Project
+  /** Every project the request buys for, primary first */
+  project_ids?: string[]
+  projects?: Pick<Project, 'id' | 'name' | 'code'>[]
+  /** Share of the request's value per project id (0–1), from the item totals */
+  project_shares?: Record<string, number>
   department?: string
   vendor_name?: string
   vendor_location?: string

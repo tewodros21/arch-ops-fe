@@ -26,7 +26,7 @@ import {
   PURCHASE_SAVED_EVENT,
   type PurchaseUnavailable,
 } from '@/services/requests'
-import { ATTACHMENT_TYPE_LABELS, PAYMENT_METHOD_LABELS, ROLE_LABELS, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest } from '@/types'
+import { ATTACHMENT_TYPE_LABELS, PAYMENT_METHOD_LABELS, ROLE_LABELS, type Approval, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest } from '@/types'
 import { formatCurrency } from '@/utils'
 
 export function RequestDetail() {
@@ -109,7 +109,11 @@ export function RequestDetail() {
   const isRequester = !!profile && profile.id === req.requester_id
   const myStage = role ? ROLE_STAGE[role] : null
   const currentStage = stageForStatus(req.status)
-  const myTurn = !!myStage && currentStage === myStage
+  const pmApprovals = (req.approvals ?? []).filter((a) => a.stage === 'project_manager')
+  const pendingPm = pmApprovals.filter((a) => a.decision === 'pending')
+  // On a multi-project request each project's PM approves; a PM who already did is done
+  const myPmTurn = currentStage !== 'project_manager' || pendingPm.some((a) => !a.reviewer_id || a.reviewer_id === profile?.id)
+  const myTurn = !!myStage && currentStage === myStage && myPmTurn
   // The server blocks self-approval too; hide the panel instead of letting it fail
   const canAct = myTurn && !isRequester
   const editable = isRequester && EDITABLE_STATUSES.includes(req.status)
@@ -120,15 +124,19 @@ export function RequestDetail() {
   // Present only when the API lets this user see where the supplier gets paid (Finance, Admin, requester)
   const seesPayment = req.supplier_account_number !== undefined
   const paymentMethod = req.supplier_payment_method || null
-  const hasProforma = !!(
-    req.vendor_name?.trim() &&
-    req.vendor_location?.trim() &&
-    Number(req.proforma_amount) > 0 &&
-    req.attachments?.some((attachment) => attachment.attachment_type === 'proforma')
-  )
+  // The Proforma document is optional; the amount comes from the items
+  const hasProforma = !!(req.vendor_name?.trim() && req.vendor_location?.trim() && Number(req.proforma_amount) > 0)
   const requestDate = req.submitted_at ?? req.created_at
 
   const items = req.items ?? []
+  const requestProjects = req.projects?.length ? req.projects : req.project ? [req.project] : []
+  const multiProject = requestProjects.length > 1
+  const itemGroups = multiProject
+    ? requestProjects.map((project) => ({
+        project,
+        items: items.filter((item) => (item.project_id ?? req.project_id) === project.id),
+      }))
+    : [{ project: null, items }]
   const itemsTotal = items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.estimated_unit_price ?? 0), 0)
   const allItemsReceived = items.length > 0 && items.every((item) => Number(item.received_quantity ?? 0) >= Number(item.quantity))
   const canComplete = isShopkeeper && allItemsReceived && ['purchased', 'partially_received'].includes(req.status)
@@ -140,9 +148,25 @@ export function RequestDetail() {
     ...(req.approvals?.some((approval) => approval.stage === 'gm') ? ['gm' as const] : []),
     ...(req.approvals?.some((approval) => approval.stage === 'owner') ? ['owner' as const] : []),
   ]
+  // One row per PM when several projects' managers approve
+  const trail = approvalStages.flatMap((stage): { key: string; stage: ApprovalStage; label: string; approval?: Approval }[] =>
+    stage === 'project_manager' && pmApprovals.length > 1
+      ? pmApprovals.map((approval) => ({
+          key: approval.id,
+          stage,
+          label: `${STAGE_LABELS[stage]}${approval.reviewer ? ` · ${approval.reviewer.full_name}` : ''}`,
+          approval,
+        }))
+      : [{ key: stage, stage, label: STAGE_LABELS[stage], approval: req.approvals?.find((a) => a.stage === stage) }],
+  )
   const defaultApproved = Number(req.proforma_amount ?? req.approved_amount ?? req.estimated_amount)
   const approvedInput = approvedAmount ?? String(defaultApproved)
-  const nextStep = currentStage === 'project_manager' ? 'Finance' : 'purchasing'
+  const nextStep =
+    currentStage === 'project_manager'
+      ? pendingPm.length > 1
+        ? 'the other project managers, then Finance'
+        : 'Finance'
+      : 'purchasing'
 
   // Hero shows the latest known figure large, the others underneath
   const amounts = (isShopkeeper ? [] : [
@@ -382,7 +406,7 @@ export function RequestDetail() {
           <div className="min-w-0 flex-1">
             <h1 className="text-[clamp(1.9rem,4vw,3rem)] leading-[1.02] font-black tracking-[-0.035em] break-words text-[var(--ink)]">{req.title}</h1>
             <p className="mt-2 text-sm text-[var(--ink-soft)]">
-              {[req.project?.name, req.department].filter(Boolean).join(' · ')}
+              {[requestProjects.map((project) => project.name).join(' + '), req.department].filter(Boolean).join(' · ')}
             </p>
           </div>
           {!isShopkeeper && headline && (
@@ -473,8 +497,20 @@ export function RequestDetail() {
                     </>
                   )}
                 </div>
+                {itemGroups.map((group) => (
+                <div key={group.project?.id ?? 'all'} className={clsx(multiProject && 'mt-4 first:mt-0')}>
+                {group.project && (
+                  <div className="mb-2 flex items-center justify-between gap-2 px-1">
+                    <span className="truncate text-sm font-bold text-[var(--ink)]">{group.project.name}</span>
+                    {!isShopkeeper && (
+                      <span className="shrink-0 text-sm font-semibold text-[var(--ink-soft)]">
+                        {formatCurrency(group.items.reduce((sum, i) => sum + Number(i.quantity) * Number(i.estimated_unit_price ?? 0), 0))}
+                      </span>
+                    )}
+                  </div>
+                )}
                 <ul className="space-y-2">
-                  {items.map((item) => {
+                  {group.items.map((item) => {
                     const total = Number(item.quantity) * Number(item.estimated_unit_price ?? 0)
                     const received = Number(item.received_quantity ?? 0)
                     const remaining = Number(item.quantity_remaining ?? item.quantity)
@@ -534,6 +570,8 @@ export function RequestDetail() {
                     )
                   })}
                 </ul>
+                </div>
+                ))}
                 {!isShopkeeper && <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-black/[0.06] px-4 pt-3">
                   <span className="text-sm text-[var(--ink-soft)]">
                     Items total
@@ -650,7 +688,7 @@ export function RequestDetail() {
                 <p className="mt-3 text-2xl leading-tight font-black text-white">Ready to submit?</p>
                 <p className="mt-1 text-sm text-white/60">
                   {!hasProforma
-                    ? 'Complete supplier details and attach the Proforma before submitting for review.'
+                    ? 'Add the supplier name, location and priced items before submitting for review.'
                     : role === 'project_manager'
                       ? 'Finance reviews this request after you submit it.'
                       : 'Submit this request to the assigned Project Manager. Project Manager requests go directly to Finance.'}
@@ -792,13 +830,12 @@ export function RequestDetail() {
           {!isShopkeeper && <section className="rounded-[1.75rem] bg-white p-6">
             <SectionTitle title="Approval trail" />
             <ol className="space-y-5">
-              {approvalStages.map((stage, i) => {
-                const approval = req.approvals?.find((a) => a.stage === stage)
+              {trail.map(({ key, stage, label, approval }, i) => {
                 const decision = approval?.decision ?? 'pending'
                 const current = currentStage === stage
                 return (
-                  <li key={stage} className="relative flex gap-3">
-                    {i < approvalStages.length - 1 && <span className="absolute top-10 bottom-[-1.25rem] left-[1.1rem] w-px bg-black/10" />}
+                  <li key={key} className="relative flex gap-3">
+                    {i < trail.length - 1 && <span className="absolute top-10 bottom-[-1.25rem] left-[1.1rem] w-px bg-black/10" />}
                     <span
                       className={clsx(
                         'relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full',
@@ -818,7 +855,7 @@ export function RequestDetail() {
                       )}
                     </span>
                     <div className="min-w-0 pt-0.5">
-                      <p className="text-sm font-semibold text-[var(--ink)]">{STAGE_LABELS[stage]}</p>
+                      <p className="text-sm font-semibold text-[var(--ink)]">{label}</p>
                       <p className="text-xs text-slate-500">
                         {decision === 'pending'
                           ? current

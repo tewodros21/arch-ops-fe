@@ -46,9 +46,27 @@ function spendBy(requests: PurchaseRequest[], keyOf: (r: PurchaseRequest) => str
   return [...rows.values()].sort((a, b) => b.approved - a.approved).slice(0, TOP_N)
 }
 
+/** Multi-project requests split their value across projects by each project's share of the items */
+function spendByProject(requests: PurchaseRequest[]): SpendRow[] {
+  const rows = new Map<string, SpendRow>()
+  for (const r of requests) {
+    if (!DONE.includes(r.status)) continue
+    const names = new Map((r.projects ?? (r.project ? [r.project] : [])).map((p) => [p.id, p.name]))
+    const shares = r.project_shares && Object.keys(r.project_shares).length ? r.project_shares : { [r.project_id]: 1 }
+    for (const [id, share] of Object.entries(shares)) {
+      const key = names.get(id) ?? r.project?.name ?? 'No project'
+      const row = rows.get(key) ?? { name: shorten(key, 16), fullName: key, approved: 0, paid: 0 }
+      row.approved += approvedValue(r) * share
+      row.paid += paidValue(r) * share
+      rows.set(key, row)
+    }
+  }
+  return [...rows.values()].sort((a, b) => b.approved - a.approved).slice(0, TOP_N)
+}
+
 export function SpendCharts({ scoped, loading }: { scoped: PurchaseRequest[]; loading: boolean }) {
   const [trendMonths, setTrendMonths] = useState(6)
-  const byProject = spendBy(scoped, (r) => r.project?.name ?? 'No project', 16)
+  const byProject = spendByProject(scoped)
   const byDepartment = spendBy(scoped, (r) => r.department?.trim() || 'Unassigned', 12)
 
   // ── Monthly trend: approved value by month raised, paid value by month purchased ──

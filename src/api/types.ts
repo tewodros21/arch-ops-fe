@@ -45,18 +45,20 @@ export interface RequestInput {
   title: string
   description: string
   project_id: string
+  /** Every selected project, primary first */
+  project_ids: string[]
   vendor_name: string
   vendor_location: string
-  proforma_amount: number | null
   supplier_payment_method: SupplierPaymentMethod | ''
   supplier_bank_name: string
   supplier_account_number: string
-  estimated_amount: number
   justification: string
   required_date: string | null
 }
 
 export interface ItemInput {
+  /** One of the request's projects; the primary project when omitted */
+  project_id?: string | null
   name: string
   quantity: number
   unit: string

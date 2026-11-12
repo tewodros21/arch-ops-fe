@@ -12,6 +12,7 @@ import { SpendCharts } from '@/components/dashboard/SpendCharts'
 import { RangeSelect } from '@/components/dashboard/kit'
 import { COLORS, DONE, IN_REVIEW, isOverdue, money } from '@/components/dashboard/metrics'
 import { formatDuration } from '@/services/labor'
+import { projectLabel } from '@/utils'
 import { notify } from '@/lib/notify'
 import { useT } from '@/lib/i18n'
 import { LanguageSwitch } from '@/components/ui/LanguageSwitch'
@@ -150,7 +151,7 @@ export function Dashboard() {
             >
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs text-slate-500">{request.request_number} · {request.project?.name}</p>
+                  <p className="text-xs text-slate-500">{request.request_number} · {projectLabel(request)}</p>
                   <h3 className="mt-1 text-lg font-bold text-[var(--ink)]">{request.title}</h3>
                 </div>
                 <StatusBadge status={request.status} />
@@ -445,7 +446,7 @@ function RequestCard({ request: r }: { request: PurchaseRequest }) {
         </div>
         <p className={clsx('mt-3 truncate text-lg', dark ? 'text-white' : 'text-[var(--ink)]')}>{r.title}</p>
         <p className={clsx('mt-1 line-clamp-2 text-[15px] leading-snug', dark ? 'text-white/80' : 'text-[var(--ink-soft)]')}>
-          {r.description || r.project?.name}
+          {r.description || projectLabel(r)}
         </p>
         {r.requester && (
           <div className="mt-3 flex items-center gap-3">
