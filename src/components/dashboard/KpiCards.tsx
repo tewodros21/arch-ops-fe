@@ -9,8 +9,7 @@ import { approvedValue, compactMoney, DONE, IN_REVIEW, isOverdue, isStuck, money
 const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
   ceo: null,
   project_manager: 'awaiting_pm',
-  site_engineer: null,
-  shopkeeper: null,
+  ceo: null,
   finance: 'awaiting_finance',
   admin: null,
 }

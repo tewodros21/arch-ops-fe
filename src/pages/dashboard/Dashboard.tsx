@@ -29,8 +29,7 @@ import {
 const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
   ceo: null,
   project_manager: 'awaiting_pm',
-  site_engineer: null,
-  shopkeeper: null,
+  ceo: null,
   finance: 'awaiting_finance',
   admin: null,
 }

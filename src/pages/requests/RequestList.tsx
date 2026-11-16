@@ -95,7 +95,7 @@ export function RequestList() {
         )}
         subtitle={
           isShopkeeper
-            ? t('{n} delivery requests to track', { n: filtered.length })
+            ? `${filtered.filter((request) => request.status === 'purchased').length} in progress · ${filtered.filter((request) => request.status === 'completed').length} delivered`
             : `${formatCurrency(Math.round(total))} estimated across ${filtered.length} request${filtered.length === 1 ? '' : 's'}`
         }
       />
