@@ -12,7 +12,7 @@ interface AssetSlotProps {
   dark?: boolean
 }
 
-// Renders the image once it exists in /public; until then shows a marked
+// Renders the image once it exists in /public. In development a missing file shows a marked
 // placeholder so the layout keeps its space for the real 3D / cut-out asset.
 export function AssetSlot({ src, label, className, imgClassName, placeholderClassName, dark }: AssetSlotProps) {
   const [missing, setMissing] = useState(false)
@@ -28,6 +28,9 @@ export function AssetSlot({ src, label, className, imgClassName, placeholderClas
       />
     )
   }
+
+  // Visitors never see a "missing image" box; developers still see where an asset belongs.
+  if (!import.meta.env.DEV) return null
 
   return (
     <div

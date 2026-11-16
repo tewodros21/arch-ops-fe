@@ -1,30 +1,28 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
-import { ArrowRight, Building2, CalendarDays, FileText, Package, Pencil, Plus, ReceiptText, RotateCcw, Trash2, Upload, X } from 'lucide-react'
+import { ArrowRight, Building2, CalendarDays, Check, FileText, Info, Package, Pencil, Plus, ReceiptText, Trash2, Upload, X } from 'lucide-react'
 import { notify } from '@/lib/notify'
-import { ACCEPT_ATTR, formatBytes, validateFile } from '@/lib/storage'
+import { ACCEPT_ATTR, attachFile, formatBytes, validateFile } from '@/lib/storage'
 import { EDITABLE_STATUSES, submitRequest } from '@/lib/workflow'
 import { useAuth } from '@/context/AuthContext'
 import { formatCurrency } from '@/utils'
 import { ReviewTile, StepField as Field, StepModal, type Step } from '@/components/ui/StepModal'
 import {
   announcePurchaseSaved,
-  addQuotation,
   createPurchaseRequest,
-  deleteQuotations,
-  fetchActiveVendors,
-  fetchDepartments,
   fetchProjects,
   fetchPurchaseRequestById,
   replaceItems,
   updatePurchaseRequest,
   type RequestInput,
 } from '@/services/requests'
-import type { Department, Project, Vendor, VendorQuotation } from '@/types'
+import { PAYMENT_METHOD_LABELS, type Project, type SupplierPaymentMethod } from '@/types'
 
 interface ItemRow {
+  /** Which selected project the line is for; empty means the first selected project */
+  project_id: string
   name: string
   quantity: string
   unit: string
@@ -32,16 +30,7 @@ interface ItemRow {
   description: string
 }
 
-interface QuotationRow {
-  vendor_id: string
-  amount: string
-  valid_until: string
-  notes: string
-  file: File | null
-}
-
-const EMPTY_ITEM: ItemRow = { name: '', quantity: '1', unit: 'unit', unit_price: '', description: '' }
-const EMPTY_QUOTATION: QuotationRow = { vendor_id: '', amount: '', valid_until: '', notes: '', file: null }
+const EMPTY_ITEM: ItemRow = { project_id: '', name: '', quantity: '1', unit: 'unit', unit_price: '', description: '' }
 const UNITS = [
   'unit', 'each', 'pcs', 'pair', 'pack', 'set', 'box', 'bag', 'sack', 'bucket', 'drum',
   'm', 'cm', 'mm', 'm²', 'm³', 'ft', 'roll', 'sheet', 'board', 'length', 'bundle', 'pallet', 'load',
@@ -50,10 +39,10 @@ const UNITS = [
 ]
 
 const STEPS: Step[] = [
-  { title: 'Details', hint: 'What you need and for which project' },
-  { title: 'Items', hint: 'Line items and quantities' },
-  { title: 'Cost & timing', hint: 'Estimate, due date and why' },
-  { title: 'Quotations', hint: 'Vendor quotes, needed to submit' },
+  { title: 'Details', hint: 'What you need and for which projects' },
+  { title: 'Items', hint: 'Items, quantities and unit prices' },
+  { title: 'Total & timing', hint: 'Total from your items, due date and why' },
+  { title: 'Supplier & Proforma', hint: 'One supplier, payment details and optional Proforma' },
   { title: 'Review', hint: 'Save a draft or submit' },
 ]
 
@@ -66,7 +55,6 @@ function money(value: string | number) {
 }
 
 const itemStarted = (r: ItemRow) => !!(r.name.trim() || r.unit_price || r.description.trim())
-const quoteStarted = (q: QuotationRow) => !!(q.vendor_id || q.amount || q.notes || q.valid_until || q.file)
 const lineTotal = (r: ItemRow) => (Number(r.quantity) || 0) * (Number(r.unit_price) || 0)
 
 /** Create a purchase request, or edit a draft when `editId` is given */
@@ -82,26 +70,24 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const [projectLoadFailed, setProjectLoadFailed] = useState(false)
   const [touched, setTouched] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
-  const [vendors, setVendors] = useState<Vendor[]>([])
-  const [departments, setDepartments] = useState<Department[]>([])
   const [items, setItems] = useState<ItemRow[]>([{ ...EMPTY_ITEM }])
-  const [quotations, setQuotations] = useState<QuotationRow[]>([{ ...EMPTY_QUOTATION }])
-  const [existingQuotes, setExistingQuotes] = useState<VendorQuotation[]>([])
-  const [removedQuoteIds, setRemovedQuoteIds] = useState<string[]>([])
-  // Until the user types an amount, the estimate follows the items total
-  const [amountOverridden, setAmountOverridden] = useState(false)
+  const [proformaFile, setProformaFile] = useState<File | null>(null)
+  const [existingProforma, setExistingProforma] = useState<string | null>(null)
   const [form, setForm] = useState({
     title: '',
     description: '',
-    project_id: '',
+    /** Selected projects in the order picked; the first is the primary project */
     project_ids: [] as string[],
-    department: profile?.department ?? '',
-    estimated_amount: '',
+    vendor_name: '',
+    vendor_location: '',
+    supplier_payment_method: '' as SupplierPaymentMethod | '',
+    supplier_bank_name: '',
+    supplier_account_number: '',
     justification: '',
     required_date: '',
   })
 
-  const applyProjectsResult = useCallback(({ data, error }: Awaited<ReturnType<typeof fetchProjects>>) => {
+  function applyProjectsResult({ data, error }: Awaited<ReturnType<typeof fetchProjects>>) {
     setLoadingProjects(false)
     if (error) {
       console.error('Error fetching projects:', error)
@@ -110,29 +96,22 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       return
     }
     setProjectLoadFailed(false)
-    const assigned = (profile?.role === 'site_engineer' || profile?.role === 'project_manager') && !profile.has_all_projects
-      ? (data ?? []).filter((project) => profile.project_ids.includes(project.id))
-      : data ?? []
-    setProjects(assigned)
-  }, [profile])
+    setProjects(data ?? [])
+  }
 
-  const loadProjects = useCallback(async () => {
-    setLoadingProjects(true)
-    setProjectLoadFailed(false)
+  async function loadProjects() {
     applyProjectsResult(await fetchProjects())
-  }, [applyProjectsResult])
+  }
 
   useEffect(() => {
     let active = true
     void fetchProjects().then((result) => {
       if (active) applyProjectsResult(result)
     })
-    fetchActiveVendors().then(setVendors)
-    fetchDepartments().then(setDepartments)
     return () => {
       active = false
     }
-  }, [applyProjectsResult])
+  }, [])
 
   // Edit mode: prefill from the saved request
   useEffect(() => {
@@ -144,20 +123,22 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         return
       }
       const savedItems = r.items ?? []
-      const savedTotal = savedItems.reduce((sum, i) => sum + Number(i.quantity) * Number(i.estimated_unit_price ?? 0), 0)
       setForm({
         title: r.title,
         description: r.description ?? '',
-        project_id: r.project_id,
         project_ids: r.project_ids?.length ? r.project_ids : [r.project_id],
-        department: r.department ?? '',
-        estimated_amount: String(r.estimated_amount ?? ''),
+        vendor_name: r.vendor_name ?? r.quotations?.[0]?.vendor?.name ?? '',
+        vendor_location: r.vendor_location ?? r.quotations?.[0]?.vendor?.address ?? '',
+        supplier_payment_method: r.supplier_payment_method ?? '',
+        supplier_bank_name: r.supplier_bank_name ?? '',
+        supplier_account_number: r.supplier_account_number ?? '',
         justification: r.justification ?? '',
         required_date: r.required_date ?? '',
       })
       setItems(
         savedItems.length
           ? savedItems.map((i) => ({
+              project_id: i.project_id ?? r.project_id,
               name: i.name,
               quantity: String(i.quantity),
               unit: i.unit,
@@ -166,9 +147,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             }))
           : [{ ...EMPTY_ITEM }],
       )
-      setAmountOverridden(Math.abs(savedTotal - Number(r.estimated_amount)) > 0.005)
-      setExistingQuotes(r.quotations ?? [])
-      setQuotations([])
+      setExistingProforma(r.attachments?.find((a) => a.attachment_type === 'proforma')?.file_name ?? null)
       setLoadingEdit(false)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -184,35 +163,59 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     setItems((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
 
-  function updateQuotation(index: number, patch: Partial<QuotationRow>) {
+  function toggleProject(id: string) {
     setTouched(true)
-    setQuotations((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+    setForm((f) => ({
+      ...f,
+      project_ids: f.project_ids.includes(id) ? f.project_ids.filter((p) => p !== id) : [...f.project_ids, id],
+    }))
   }
 
+  function addItem(projectId: string) {
+    setTouched(true)
+    setItems((rows) => [...rows, { ...EMPTY_ITEM, project_id: projectId }])
+  }
+
+  const selectedProjects = form.project_ids
+    .map((id) => projects.find((p) => p.id === id))
+    .filter((p): p is Project => !!p)
+  const multiProject = form.project_ids.length > 1
+  // Lines for a project that is no longer selected fall back to the first selected project
+  const projectOf = (r: ItemRow) => (form.project_ids.includes(r.project_id) ? r.project_id : (form.project_ids[0] ?? ''))
   const filledItems = items.filter(itemStarted)
   const itemsTotal = filledItems.reduce((sum, r) => sum + lineTotal(r), 0)
-  const followsItems = !amountOverridden && itemsTotal > 0
-  const estimate = followsItems ? itemsTotal : Number(form.estimated_amount)
-  const keptQuotes = existingQuotes.filter((quote) => !removedQuoteIds.includes(quote.id))
-  const newQuotes = quotations.filter(quoteStarted)
-  const quoteCount = keptQuotes.length + newQuotes.length
-  const quoteAmounts = [...keptQuotes.map((quote) => Number(quote.amount)), ...newQuotes.map((quote) => Number(quote.amount)).filter((amount) => amount > 0)]
-  const lowestQuote = quoteAmounts.length ? Math.min(...quoteAmounts) : null
-  const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || (r.unit_price !== '' && Number(r.unit_price) < 0))
-  const badQuote = newQuotes.find((quote) => !quote.vendor_id || !(Number(quote.amount) > 0))
+  const totalFor = (projectId: string) => filledItems.filter((r) => projectOf(r) === projectId).reduce((sum, r) => sum + lineTotal(r), 0)
+  const emptyProject = multiProject ? selectedProjects.find((p) => !filledItems.some((r) => projectOf(r) === p.id)) : undefined
+  const hasVendorDetails = !!(form.vendor_name.trim() && form.vendor_location.trim())
+
+  const accountDigits = form.supplier_account_number.replace(/\D/g, '')
+  const paymentError =
+    form.supplier_account_number.trim() && !/^[\d\s+-]+$/.test(form.supplier_account_number.trim())
+      ? 'Use digits only for the account or Telebirr number'
+      : form.supplier_payment_method === 'telebirr' && accountDigits && (accountDigits.length < 9 || accountDigits.length > 12)
+        ? 'Enter a valid Telebirr phone number, e.g. 0912345678'
+        : null
+
+  const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || !(Number(r.unit_price) > 0))
   const projectError = loadingProjects
     ? 'Projects are still loading. Please wait a moment.'
     : projectLoadFailed
       ? 'Could not load projects. Try again.'
       : projects.length === 0
-        ? 'No active projects are assigned to your account, or none are available. Ask an admin to add or assign a project.'
-        : 'Choose at least one project for this purchase'
+        ? 'No active projects are available. Ask an admin to add or activate one before creating a purchase request.'
+        : 'Choose which project this purchase is for'
 
   const stepErrors: Record<number, string | null> = {
-    0: !form.title.trim() ? 'Add a short title for this request' : form.project_ids.length === 0 ? projectError : null,
-    1: filledItems.length === 0 ? 'Add at least one item to this request' : badItem ? 'Each item needs a name and a quantity' : null,
-    2: !(estimate > 0) ? 'Enter an estimated amount to continue' : null,
-    3: badQuote ? 'Each quote needs a vendor and an amount' : null,
+    0: !form.title.trim() ? 'Add a short title for this request' : !form.project_ids.length ? projectError : null,
+    1: !filledItems.length
+      ? 'Add at least one item'
+      : badItem
+        ? 'Each item needs a name, a quantity and a unit price'
+        : emptyProject
+          ? `Add at least one item for ${emptyProject.name}, or remove that project`
+          : null,
+    2: null,
+    3: paymentError,
     4: null,
   }
 
@@ -249,9 +252,10 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       notify.warning(stepErrors[firstInvalid]!)
       return
     }
-    if (submitAfter && quoteCount === 0) {
+    if (submitAfter && !hasVendorDetails) {
+      setShowErrors(true)
       setStep(3)
-      notify.warning('Add a vendor quote before submitting')
+      notify.warning('Enter the supplier name and location')
       return
     }
     setBusy(true)
@@ -259,10 +263,13 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     const input: RequestInput = {
       title: form.title.trim(),
       description: form.description.trim(),
-      project_id: form.project_id,
+      project_id: form.project_ids[0],
       project_ids: form.project_ids,
-      department: form.department.trim() || 'General',
-      estimated_amount: estimate,
+      vendor_name: form.vendor_name.trim(),
+      vendor_location: form.vendor_location.trim(),
+      supplier_payment_method: form.supplier_account_number.trim() ? form.supplier_payment_method : '',
+      supplier_bank_name: form.supplier_payment_method === 'bank' ? form.supplier_bank_name.trim() : '',
+      supplier_account_number: form.supplier_payment_method ? form.supplier_account_number.trim() : '',
       justification: form.justification.trim(),
       required_date: form.required_date || null,
     }
@@ -289,6 +296,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     const { error: itemsError } = await replaceItems(
       requestId,
       filledItems.map((r) => ({
+        project_id: projectOf(r),
         name: r.name.trim(),
         quantity: Number(r.quantity),
         unit: r.unit.trim() || 'unit',
@@ -296,35 +304,31 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         description: r.description.trim() || null,
       })),
     )
-    if (itemsError) {
-      setBusy(false)
-      notify.error(`Line items were not saved: ${itemsError}`)
-      announcePurchaseSaved(requestId)
-      navigate(`/requests/${requestId}`)
-      return
-    }
+    if (itemsError) notify.warning(`Line items were not saved: ${itemsError}`)
 
-    const { error: removeError } = await deleteQuotations(removedQuoteIds)
-    if (removeError) notify.warning(`A removed quote could not be deleted: ${removeError}`)
-
-    for (const quote of newQuotes) {
-      const { error, fileError } = await addQuotation(requestId, {
-        vendor_id: quote.vendor_id,
-        amount: Number(quote.amount),
-        valid_until: quote.valid_until || null,
-        notes: quote.notes.trim() || null,
-        file: quote.file,
-      })
-      if (error) notify.warning(`A vendor quotation was not saved: ${error}`)
-      else if (fileError) notify.warning(`Quote file could not be uploaded: ${fileError}`)
+    if (proformaFile) {
+      const { error } = await attachFile(requestId, proformaFile, 'proforma', 'Supplier Proforma')
+      if (error) {
+        setBusy(false)
+        notify.error(`Request saved, but the Proforma could not be uploaded: ${error}`)
+        return
+      }
+      setExistingProforma(proformaFile.name)
+      setProformaFile(null)
     }
 
     if (submitAfter) {
       const { error } = await submitRequest(requestId)
-      if (error) notify.error(`Saved as draft, not submitted: ${error}`)
-      else notify.success('Request submitted for Project Manager review')
+      if (error) {
+        setBusy(false)
+        notify.error(`Saved as draft, not submitted: ${error}`)
+        announcePurchaseSaved(requestId)
+        navigate(`/requests/${requestId}`)
+        return
+      }
+      else notify.success('Request submitted for Finance review')
     } else {
-      notify.success(editing ? 'Draft changes saved' : 'Draft saved; add quotations before submitting')
+      notify.success(editing ? 'Draft changes saved' : 'Draft saved, complete the supplier details before submitting')
     }
 
     setBusy(false)
@@ -332,12 +336,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     navigate(`/requests/${requestId}`)
   }
 
-  const selectedProjects = projects.filter((p) => form.project_ids.includes(p.id))
-  const project = selectedProjects[0]
+  const projectNames = selectedProjects.map((p) => p.name).join(' + ')
   const err = (s: number, when: boolean) => showErrors && step === s && when
-  // Keep an unlisted saved department selectable
-  const departmentNames = departments.map((d) => d.name)
-  if (form.department && departmentNames.length && !departmentNames.includes(form.department)) departmentNames.unshift(form.department)
 
   return (
     <StepModal
@@ -349,8 +349,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       onBack={() => setStep((s) => s - 1)}
       onGoTo={goTo}
       onSubmit={() => save(true)}
-      submitLabel="Submit for Project Manager review"
-      submitDisabled={quoteCount === 0}
+      submitLabel="Submit for Finance review"
+      submitDisabled={!hasVendorDetails}
       secondaryAction={{ label: editing ? 'Save changes' : 'Save as draft', onClick: () => save(false) }}
       discardPrompt={editing ? 'Discard your changes?' : 'Discard this request?'}
       busy={busy}
@@ -361,15 +361,21 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
           <p className="truncate text-sm text-white">{form.title || 'Untitled request'}</p>
           <div className="flex items-end justify-between gap-2">
             <span className="truncate text-xs text-white/50">
-              {selectedProjects.map((p) => p.name).join(', ') || 'No project yet'}
+              {projectNames || 'No project yet'}
               {filledItems.length > 0 && ` · ${filledItems.length} item${filledItems.length === 1 ? '' : 's'}`}
             </span>
-            <span className="text-xl font-bold text-white">{money(estimate)}</span>
+            <span className="text-xl font-bold text-white">{money(itemsTotal)}</span>
           </div>
           <div className="flex items-center gap-1.5 border-t border-white/10 pt-3 text-[11px] text-white/55">
-            <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 font-semibold text-[var(--ink)]">Project Manager</span>
-            <ArrowRight size={12} />
-            <span>Finance</span>
+            {profile?.role === 'project_manager' ? (
+              <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 font-semibold text-[var(--ink)]">Finance</span>
+            ) : (
+              <>
+                <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 font-semibold text-[var(--ink)]">Project Manager</span>
+                <ArrowRight size={12} />
+                <span>Finance</span>
+              </>
+            )}
           </div>
         </>
       }
@@ -387,7 +393,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             />
           </Field>
 
-          <Field label="Project(s)" error={err(0, form.project_ids.length === 0)}>
+          <Field label="Projects" error={err(0, !form.project_ids.length)}>
+            <p className="mb-2 text-xs text-slate-500">Pick one project, or several when the same supplier delivers for more than one.</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {projects.map((p) => {
                 const active = form.project_ids.includes(p.id)
@@ -395,13 +402,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                   <button
                     key={p.id}
                     type="button"
-                    onClick={() => {
-                      const projectIds = active
-                        ? form.project_ids.filter((id) => id !== p.id)
-                        : [...form.project_ids, p.id]
-                      setTouched(true)
-                      setForm((current) => ({ ...current, project_ids: projectIds, project_id: projectIds[0] ?? '' }))
-                    }}
+                    onClick={() => toggleProject(p.id)}
                     aria-pressed={active}
                     className={clsx(
                       'focus-ring flex items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition-all',
@@ -414,7 +415,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                         active ? 'bg-[var(--accent)] text-white' : 'bg-[var(--canvas)] text-[var(--ink)]',
                       )}
                     >
-                      <Building2 size={17} />
+                      {active ? <Check size={17} strokeWidth={2.5} /> : <Building2 size={17} />}
                     </span>
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">{p.name}</span>
@@ -444,14 +445,12 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 </div>
               )}
               {!loadingProjects && !projectLoadFailed && projects.length === 0 && (
-                <p className="text-sm text-slate-500">
-                  No active projects are available or assigned to your account. Ask an admin to add or assign a project.
-                </p>
+                <p className="text-sm text-slate-500">No active projects are available. Ask an admin to add or activate a project before creating a purchase request.</p>
               )}
             </div>
           </Field>
 
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-[1fr_14rem]">
+          <div className="grid grid-cols-1 gap-5">
             <Field label="Description" optional>
               <textarea
                 value={form.description}
@@ -461,23 +460,6 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 className={clsx(inputClass, 'resize-none border-transparent')}
               />
             </Field>
-            <Field label="Department" optional>
-              {departmentNames.length > 0 ? (
-                <select value={form.department} onChange={(e) => update('department', e.target.value)} className={clsx(inputClass, 'border-transparent')}>
-                  <option value="">General</option>
-                  {departmentNames.map((name) => (
-                    <option key={name} value={name}>{name}</option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  value={form.department}
-                  onChange={(e) => update('department', e.target.value)}
-                  placeholder="General"
-                  className={clsx(inputClass, 'border-transparent')}
-                />
-              )}
-            </Field>
           </div>
         </>
       )}
@@ -485,150 +467,141 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       {!loadingEdit && step === 1 && (
         <>
           <p className="text-sm text-[var(--ink-soft)]">
-            List what you are buying. Prices are estimates; the total becomes your estimated amount.
+            List what you are buying with a unit price for each. The total is calculated for you.
           </p>
           <datalist id="item-units">
             {UNITS.map((u) => (
               <option key={u} value={u} />
             ))}
           </datalist>
-          <div className="space-y-3">
-            {items.map((r, i) => {
-              const invalid = showErrors && step === 1 && itemStarted(r) && (!r.name.trim() || !(Number(r.quantity) > 0))
-              return (
-                <div key={i} className={clsx('rounded-[1.5rem] border p-4', invalid ? 'border-[var(--accent)]' : 'border-black/10')}>
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-2 text-sm font-semibold text-[var(--ink)]">
-                      <Package size={15} className="text-slate-400" />
-                      Item {i + 1}
+          {(multiProject ? selectedProjects : [null]).map((group) => {
+            const groupId = group?.id ?? form.project_ids[0] ?? ''
+            const rows = items.map((r, i) => ({ r, i })).filter(({ r }) => !multiProject || projectOf(r) === groupId)
+            return (
+              <section key={groupId || 'single'} className={clsx('space-y-3', multiProject && 'rounded-[1.75rem] bg-[var(--canvas)]/60 p-3')}>
+                {group && (
+                  <div className="flex items-center justify-between gap-2 px-1">
+                    <span className="flex min-w-0 items-center gap-2 text-sm font-bold text-[var(--ink)]">
+                      <Building2 size={15} className="shrink-0 text-[var(--accent)]" />
+                      <span className="truncate">{group.name}</span>
                     </span>
-                    <span className="flex items-center gap-2">
-                      {lineTotal(r) > 0 && <span className="text-sm font-bold text-[var(--ink)]">{money(lineTotal(r))}</span>}
-                      {items.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTouched(true)
-                            setItems((rows) => rows.filter((_, idx) => idx !== i))
-                          }}
-                          aria-label={`Remove item ${i + 1}`}
-                          className="focus-ring rounded-full p-1.5 text-slate-400 transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </span>
+                    <span className="shrink-0 text-sm font-semibold text-[var(--ink)]">{money(totalFor(group.id))}</span>
                   </div>
-                  <input
-                    value={r.name}
-                    onChange={(e) => updateItem(i, { name: e.target.value })}
-                    placeholder="Item name, e.g. HEB 200 steel beam"
-                    aria-label={`Item ${i + 1} name`}
-                    className={clsx(inputClass, 'border-transparent')}
-                  />
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="any"
-                      value={r.quantity}
-                      onChange={(e) => updateItem(i, { quantity: e.target.value })}
-                      placeholder="Qty"
-                      aria-label={`Item ${i + 1} quantity`}
-                      className={clsx(inputClass, 'border-transparent')}
-                    />
-                    <input
-                      list="item-units"
-                      value={r.unit}
-                      onChange={(e) => updateItem(i, { unit: e.target.value })}
-                      placeholder="Unit"
-                      aria-label={`Item ${i + 1} unit`}
-                      className={clsx(inputClass, 'border-transparent')}
-                    />
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="0.01"
-                      value={r.unit_price}
-                      onChange={(e) => updateItem(i, { unit_price: e.target.value })}
-                      placeholder="Unit $"
-                      aria-label={`Item ${i + 1} estimated unit price`}
-                      className={clsx(inputClass, 'border-transparent')}
-                    />
-                  </div>
-                  <input
-                    value={r.description}
-                    onChange={(e) => updateItem(i, { description: e.target.value })}
-                    placeholder="Specs or notes (optional)"
-                    aria-label={`Item ${i + 1} description`}
-                    className={clsx(inputClass, 'mt-2 border-transparent')}
-                  />
-                </div>
-              )
-            })}
-          </div>
-          <button
-            type="button"
-            onClick={() => setItems((rows) => [...rows, { ...EMPTY_ITEM }])}
-            className="focus-ring flex w-full items-center justify-center gap-2 rounded-[1.5rem] border-2 border-dashed border-black/10 py-4 text-sm font-medium text-[var(--ink)] transition-colors hover:border-black/30"
-          >
-            <Plus size={16} />
-            Add another item
-          </button>
-          <div className="flex items-center justify-between rounded-[1.5rem] bg-[var(--canvas)] px-5 py-4">
-            <span className="text-sm text-[var(--ink-soft)]">
-              {filledItems.length} item{filledItems.length === 1 ? '' : 's'} · estimated total
+                )}
+                {rows.map(({ r, i }, n) => {
+                  const invalid = showErrors && step === 1 && itemStarted(r) && (!r.name.trim() || !(Number(r.quantity) > 0) || !(Number(r.unit_price) > 0))
+                  return (
+                    <div key={i} className={clsx('rounded-[1.5rem] border bg-white p-4', invalid ? 'border-[var(--accent)]' : 'border-black/10')}>
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-2 text-sm font-semibold text-[var(--ink)]">
+                          <Package size={15} className="text-slate-400" />
+                          Item {n + 1}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          {lineTotal(r) > 0 && <span className="text-sm font-bold text-[var(--ink)]">{money(lineTotal(r))}</span>}
+                          {items.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTouched(true)
+                                setItems((all) => all.filter((_, idx) => idx !== i))
+                              }}
+                              aria-label={`Remove item ${n + 1}${group ? ` for ${group.name}` : ''}`}
+                              className="focus-ring rounded-full p-1.5 text-slate-400 transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                      <input
+                        value={r.name}
+                        onChange={(e) => updateItem(i, { name: e.target.value })}
+                        placeholder="Item name, e.g. HEB 200 steel beam"
+                        aria-label={`Item ${n + 1} name`}
+                        className={clsx(inputClass, 'border-transparent')}
+                      />
+                      <div className="mt-2 grid grid-cols-3 gap-2">
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="any"
+                          value={r.quantity}
+                          onChange={(e) => updateItem(i, { quantity: e.target.value })}
+                          placeholder="Qty"
+                          aria-label={`Item ${n + 1} quantity`}
+                          className={clsx(inputClass, 'border-transparent')}
+                        />
+                        <input
+                          list="item-units"
+                          value={r.unit}
+                          onChange={(e) => updateItem(i, { unit: e.target.value })}
+                          placeholder="Unit"
+                          aria-label={`Item ${n + 1} unit`}
+                          className={clsx(inputClass, 'border-transparent')}
+                        />
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min="0"
+                          step="0.01"
+                          value={r.unit_price}
+                          onChange={(e) => updateItem(i, { unit_price: e.target.value })}
+                          placeholder="Unit price ETB"
+                          aria-label={`Item ${n + 1} unit price`}
+                          className={clsx(inputClass, invalid && !(Number(r.unit_price) > 0) ? 'border-[var(--accent)]' : 'border-transparent')}
+                        />
+                      </div>
+                      <input
+                        value={r.description}
+                        onChange={(e) => updateItem(i, { description: e.target.value })}
+                        placeholder="Specs or notes (optional)"
+                        aria-label={`Item ${n + 1} description`}
+                        className={clsx(inputClass, 'mt-2 border-transparent')}
+                      />
+                    </div>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={() => addItem(groupId)}
+                  className="focus-ring flex w-full items-center justify-center gap-2 rounded-[1.5rem] border-2 border-dashed border-black/10 py-4 text-sm font-medium text-[var(--ink)] transition-colors hover:border-black/30"
+                >
+                  <Plus size={16} />
+                  {group ? `Add item for ${group.name}` : 'Add another item'}
+                </button>
+              </section>
+            )
+          })}
+          <div className="flex items-center justify-between rounded-[1.5rem] bg-[var(--ink)] px-5 py-4 text-white">
+            <span className="text-sm text-white/70">
+              {filledItems.length} item{filledItems.length === 1 ? '' : 's'} · total
             </span>
-            <span className="text-2xl font-black tracking-tight text-[var(--ink)]">{money(itemsTotal)}</span>
+            <span className="text-2xl font-black tracking-tight">{money(itemsTotal)}</span>
           </div>
         </>
       )}
 
       {!loadingEdit && step === 2 && (
         <>
-          <Field label="Estimated amount (ETB)" error={err(2, !(estimate > 0))}>
-            <div
-              className={clsx(
-                'flex items-center gap-2 rounded-[1.5rem] border bg-[var(--canvas)] px-5 py-4 transition-colors focus-within:border-[var(--ink)] focus-within:bg-white',
-                err(2, !(estimate > 0)) ? 'border-[var(--accent)]' : 'border-transparent',
-              )}
-            >
-              <span className="text-4xl font-black text-slate-300">$</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.01"
-                value={followsItems ? String(Math.round(itemsTotal * 100) / 100) : form.estimated_amount}
-                onChange={(e) => {
-                  setAmountOverridden(true)
-                  update('estimated_amount', e.target.value)
-                }}
-                placeholder="0"
-                className="w-full min-w-0 bg-transparent text-4xl font-black tracking-tight text-[var(--ink)] outline-none placeholder:text-slate-300 sm:text-5xl"
-              />
-            </div>
-            {itemsTotal > 0 && (
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
-                <span>{followsItems ? 'Matches your items total.' : `Items total is ${money(itemsTotal)}.`}</span>
-                {!followsItems && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAmountOverridden(false)
-                      update('estimated_amount', '')
-                    }}
-                    className="focus-ring inline-flex items-center gap-1 rounded-full px-2 py-1 font-semibold text-[var(--ink)] hover:bg-[var(--canvas)]"
-                  >
-                    <RotateCcw size={12} />
-                    Use items total
-                  </button>
-                )}
-              </div>
+          <div className="rounded-[1.5rem] bg-[var(--canvas)] px-5 py-4">
+            <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Total (from your items)</p>
+            <p className="mt-1 text-4xl font-black tracking-tight text-[var(--ink)] sm:text-5xl">{money(itemsTotal)}</p>
+            {multiProject && (
+              <ul className="mt-3 space-y-1 border-t border-black/[0.06] pt-3 text-sm">
+                {selectedProjects.map((p) => (
+                  <li key={p.id} className="flex justify-between gap-3 text-[var(--ink-soft)]">
+                    <span className="truncate">{p.name}</span>
+                    <span className="shrink-0 font-semibold text-[var(--ink)]">{money(totalFor(p.id))}</span>
+                  </li>
+                ))}
+              </ul>
             )}
-          </Field>
+            <button type="button" onClick={() => setStep(1)} className="mt-2 text-xs font-semibold text-[var(--ink)] underline underline-offset-2">
+              Change items or prices
+            </button>
+          </div>
 
           <Field label="Needed by" optional>
             <div className="relative">
@@ -648,7 +621,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               value={form.justification}
               onChange={(e) => update('justification', e.target.value)}
               rows={4}
-              placeholder="Why is this needed? Finance reads this first."
+              placeholder="Why is this needed? Reviewers will use this to assess the request."
               className={clsx(inputClass, 'resize-none border-transparent')}
             />
           </Field>
@@ -658,107 +631,82 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       {!loadingEdit && step === 3 && (
         <>
           <p className="text-sm text-[var(--ink-soft)]">
-            Add vendor quotations for comparison. At least one quotation is required before submitting.
+            Enter the supplier details and Proforma amount. Attaching the Proforma document is optional.
           </p>
-          {keptQuotes.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Saved quotations</p>
-              {keptQuotes.map((quote) => (
-                <div key={quote.id} className="flex items-center justify-between gap-3 rounded-2xl bg-[var(--canvas)] px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-[var(--ink)]">{quote.vendor?.name ?? 'Vendor'} · {money(quote.amount)}</p>
-                    {quote.notes && <p className="truncate text-xs text-slate-500">{quote.notes}</p>}
-                  </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <Field label="Supplier name">
+              <input
+                value={form.vendor_name}
+                onChange={(e) => update('vendor_name', e.target.value)}
+                placeholder="Supplier or company name"
+                className={clsx(inputClass, 'border-transparent')}
+              />
+            </Field>
+            <Field label="Supplier location">
+              <input
+                value={form.vendor_location}
+                onChange={(e) => update('vendor_location', e.target.value)}
+                placeholder="City, site, or address"
+                className={clsx(inputClass, 'border-transparent')}
+              />
+            </Field>
+          </div>
+          <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+            Proforma amount: <span className="font-semibold text-[var(--ink)]">{money(itemsTotal)}</span>, the total of your items.
+          </p>
+          <Field label="Payment details for Finance" optional>
+            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Payment method">
+              {(Object.keys(PAYMENT_METHOD_LABELS) as SupplierPaymentMethod[]).map((method) => {
+                const active = form.supplier_payment_method === method
+                return (
                   <button
+                    key={method}
                     type="button"
-                    onClick={() => {
-                      setTouched(true)
-                      setRemovedQuoteIds((ids) => [...ids, quote.id])
-                    }}
-                    aria-label={`Remove quotation from ${quote.vendor?.name ?? 'vendor'}`}
-                    className="focus-ring rounded-full p-2 text-slate-400 hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+                    aria-pressed={active}
+                    onClick={() => update('supplier_payment_method', active ? '' : method)}
+                    className={clsx(
+                      'focus-ring rounded-2xl border px-4 py-3 text-sm font-medium transition-colors',
+                      active ? 'border-[var(--ink)] bg-[var(--ink)] text-white' : 'border-black/10 text-[var(--ink)] hover:border-black/30',
+                    )}
                   >
-                    <Trash2 size={15} />
+                    {PAYMENT_METHOD_LABELS[method]}
                   </button>
-                </div>
-              ))}
+                )
+              })}
             </div>
-          )}
-          {quotations.map((quote, index) => {
-            const invalid = showErrors && step === 3 && quoteStarted(quote) && (!quote.vendor_id || !(Number(quote.amount) > 0))
-            const isLowest = lowestQuote !== null && quoteAmounts.length > 1 && Number(quote.amount) === lowestQuote
-            return (
-              <div key={index} className={clsx('rounded-[1.5rem] border p-4', invalid ? 'border-[var(--accent)]' : 'border-black/10')}>
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="flex items-center gap-2 text-sm font-semibold text-[var(--ink)]">
-                    Quotation {keptQuotes.length + index + 1}
-                    {isLowest && <span className="rounded-full bg-[var(--sun)] px-2 py-0.5 text-[11px] font-semibold">Lowest</span>}
-                  </span>
-                  {quotations.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTouched(true)
-                        setQuotations((rows) => rows.filter((_, i) => i !== index))
-                      }}
-                      aria-label={`Remove quotation ${index + 1}`}
-                      className="focus-ring rounded-full p-1.5 text-slate-400 hover:text-[var(--accent)]"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_11rem]">
-                  <select
-                    value={quote.vendor_id}
-                    onChange={(event) => updateQuotation(index, { vendor_id: event.target.value })}
-                    aria-label="Vendor"
-                    className={clsx(inputClass, 'border-transparent')}
-                  >
-                    <option value="">Select vendor</option>
-                    {vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
-                  </select>
+            {form.supplier_payment_method && (
+              <div className={clsx('mt-2 grid grid-cols-1 gap-2', form.supplier_payment_method === 'bank' && 'sm:grid-cols-2')}>
+                {form.supplier_payment_method === 'bank' && (
                   <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={quote.amount}
-                    onChange={(event) => updateQuotation(index, { amount: event.target.value })}
-                    placeholder="Quoted amount (ETB)"
-                    aria-label="Quoted amount"
+                    value={form.supplier_bank_name}
+                    onChange={(e) => update('supplier_bank_name', e.target.value)}
+                    placeholder="Bank name, e.g. CBE"
+                    aria-label="Bank name"
                     className={clsx(inputClass, 'border-transparent')}
                   />
-                </div>
-                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  <input
-                    type="date"
-                    value={quote.valid_until}
-                    onChange={(event) => updateQuotation(index, { valid_until: event.target.value })}
-                    aria-label="Quote valid until"
-                    className={clsx(inputClass, 'border-transparent')}
-                  />
-                  <input
-                    value={quote.notes}
-                    onChange={(event) => updateQuotation(index, { notes: event.target.value })}
-                    placeholder="Notes (optional)"
-                    aria-label="Quotation notes"
-                    className={clsx(inputClass, 'border-transparent')}
-                  />
-                </div>
-                <Field label="Quotation document" optional>
-                  <DropZone file={quote.file} onFile={(file) => updateQuotation(index, { file })} />
-                </Field>
+                )}
+                <input
+                  value={form.supplier_account_number}
+                  onChange={(e) => update('supplier_account_number', e.target.value)}
+                  inputMode="numeric"
+                  placeholder={form.supplier_payment_method === 'bank' ? 'Account number' : 'Telebirr phone number, e.g. 0912345678'}
+                  aria-label={form.supplier_payment_method === 'bank' ? 'Account number' : 'Telebirr number'}
+                  className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
+                />
               </div>
-            )
-          })}
-          <button
-            type="button"
-            onClick={() => setQuotations((rows) => [...rows, { ...EMPTY_QUOTATION }])}
-            className="focus-ring flex w-full items-center justify-center gap-2 rounded-[1.5rem] border-2 border-dashed border-black/10 py-4 text-sm font-medium text-[var(--ink)] hover:border-black/30"
-          >
-            <Plus size={16} />
-            Add another quotation
-          </button>
+            )}
+            {err(3, !!paymentError) && <p className="mt-2 text-xs font-medium text-[var(--accent)]">{paymentError}</p>}
+            <p className="mt-2 text-xs text-slate-500">Only Finance and Admin can see these details. Finance uses them to transfer the payment.</p>
+          </Field>
+          {existingProforma && !proformaFile && (
+            <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+              Attached Proforma: <span className="font-semibold text-[var(--ink)]">{existingProforma}</span>
+            </p>
+          )}
+          <DropZone file={proformaFile} onFile={(file) => {
+            setTouched(true)
+            setProformaFile(file)
+          }} />
         </>
       )}
 
@@ -767,16 +715,15 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
           <div className="rounded-[1.5rem] bg-[var(--canvas)] p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="text-xs text-slate-500">{project?.name}</p>
+                <p className="text-xs text-slate-500">{projectNames}</p>
                 <p className="mt-1 text-xl font-bold text-[var(--ink)]">{form.title}</p>
                 {form.description && <p className="mt-1 text-sm text-[var(--ink-soft)]">{form.description}</p>}
               </div>
-              <p className="text-4xl font-black tracking-tight text-[var(--ink)]">{money(estimate)}</p>
+              <p className="text-4xl font-black tracking-tight text-[var(--ink)]">{money(itemsTotal)}</p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <ReviewTile label="Department" value={form.department || 'General'} onEdit={() => setStep(0)} />
             <ReviewTile
               label="Items"
               value={filledItems.length ? `${filledItems.length} · ${money(itemsTotal)}` : 'None listed'}
@@ -787,7 +734,20 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               value={form.required_date ? format(new Date(`${form.required_date}T00:00`), 'MMM d, yyyy') : 'Not set'}
               onEdit={() => setStep(2)}
             />
-            <ReviewTile label="Quotations" value={quoteCount ? `${quoteCount} · lowest ${money(lowestQuote ?? 0)}` : 'None yet'} onEdit={() => setStep(3)} />
+            <ReviewTile
+              label="Pay to"
+              value={
+                form.supplier_payment_method && form.supplier_account_number.trim()
+                  ? `${PAYMENT_METHOD_LABELS[form.supplier_payment_method]} · ${form.supplier_account_number.trim()}`
+                  : 'Not provided'
+              }
+              onEdit={() => setStep(3)}
+            />
+            <ReviewTile
+              label="Supplier / Proforma"
+              value={hasVendorDetails ? `${form.vendor_name} · ${money(itemsTotal)}` : 'Incomplete'}
+              onEdit={() => setStep(3)}
+            />
           </div>
 
           {filledItems.length > 0 && (
@@ -816,12 +776,32 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </div>
           )}
 
-          <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--sun-soft)] p-4 text-sm text-[var(--ink)]">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--sun)]">
-              <ArrowRight size={16} />
-            </span>
-            Submitting sends the request to the assigned Project Manager, then Finance.
-          </div>
+          {!hasVendorDetails ? (
+            <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--accent-soft)] p-4 text-sm text-[var(--ink)]">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[var(--accent)]">
+                <Info size={16} />
+              </span>
+              <span>
+                Add the supplier name and location to submit. The Proforma document is optional.{' '}
+                <button type="button" onClick={() => setStep(3)} className="font-semibold underline underline-offset-2">
+                  Complete supplier details
+                </button>{' '}
+                or save this as a draft for now.
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--sun-soft)] p-4 text-sm text-[var(--ink)]">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--sun)]">
+                <ArrowRight size={16} />
+              </span>
+              <span>
+                {profile?.role === 'project_manager'
+                  ? 'Submitting sends this request directly to Finance for review.'
+                  : 'Submitting sends this request to the assigned Project Manager, then Finance.'}
+                {!proformaFile && !existingProforma && ' You can submit without the Proforma document.'}
+              </span>
+            </div>
+          )}
         </>
       )}
     </StepModal>
@@ -878,7 +858,7 @@ function DropZone({ file, onFile }: { file: File | null; onFile: (file: File | n
     >
       <Upload size={16} className="shrink-0" />
       <span>
-        Drop the file or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
+        Add Proforma document (optional) or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
       </span>
       <input
         type="file"

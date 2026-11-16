@@ -1,3 +1,4 @@
+import { useT } from '@/lib/i18n'
 import { STATUS_COLORS, STATUS_LABELS, LABOR_STATUS_LABELS, type RequestStatus, type LaborStatus } from '@/types'
 
 function Badge({ color, label }: { color: string; label: string }) {
@@ -13,7 +14,8 @@ function Badge({ color, label }: { color: string; label: string }) {
 }
 
 export function StatusBadge({ status }: { status: RequestStatus }) {
-  return <Badge color={STATUS_COLORS[status]} label={STATUS_LABELS[status]} />
+  const t = useT()
+  return <Badge color={STATUS_COLORS[status]} label={t(STATUS_LABELS[status])} />
 }
 
 const LABOR_COLORS: Record<LaborStatus, string> = {

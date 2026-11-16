@@ -1,6 +1,6 @@
 import type { AppNotification, AuditEvent, Department, LaborRequest, Profile, Project, PurchaseRequest, SiteEmployee, Vendor } from '@/types'
 import { ensureCsrf, hasSession, http, list, onSessionChange, request, setSession, type Page } from './http'
-import type { Backend, ItemReceiptInput, Result, SiteEmployeeInput, SiteEmployeePatch, VendorHistory, VendorInput } from './types'
+import type { Backend, ItemReceiptInput, ReceiptInput, Result, SiteEmployeeInput, SiteEmployeePatch, VendorHistory, VendorInput } from './types'
 
 // Data source for the Django REST API. Cookie session auth; the server enforces roles,
 // the approval workflow, audit and notifications.
@@ -116,9 +116,15 @@ export const djangoBackend: Backend = {
     selectQuotation: (_requestId, quoteId) => done(http.post(`/quotations/${quoteId}/select/`)),
     submit: (id) => done(http.post(`/purchase-requests/${id}/submit/`)),
     decide: (id, decision, comment, approvedAmount) =>
-      done(http.post(`/purchase-requests/${id}/decide/`, { decision, comment: comment || null, approved_amount: approvedAmount ?? null })),
+      done(http.post(`/purchase-requests/${id}/decide/`, {
+        decision,
+        comment: comment || null,
+        ...(approvedAmount != null ? { approved_amount: approvedAmount } : {}),
+      })),
     recordPurchase: (id, actualAmount) => done(http.post(`/purchase-requests/${id}/record-purchase/`, { actual_amount: actualAmount })),
     updateReceivedItems: (id, items: ItemReceiptInput[]) => done(http.post(`/purchase-requests/${id}/receive/`, { items })),
+    receive: (id, input: ReceiptInput) => done(http.post(`/purchase-requests/${id}/receive/`, input)),
+    complete: (id) => done(http.post(`/purchase-requests/${id}/complete/`)),
   },
 
   attachments: {

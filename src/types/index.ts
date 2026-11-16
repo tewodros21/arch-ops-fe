@@ -1,20 +1,20 @@
 export type Role =
+  | 'finance'
   | 'admin'
   | 'ceo'
   | 'project_manager'
   | 'site_engineer'
-  | 'finance'
   | 'shopkeeper'
 
 export type RequestStatus =
   | 'draft'
-  | 'quote_received'
+  | 'proforma_received'
+  | 'awaiting_pm'
   | 'awaiting_finance'
-  | 'awaiting_gm'
-  | 'awaiting_owner'
   | 'approved'
   | 'rejected'
   | 'purchased'
+  | 'partially_received'
   | 'completed'
 
 export type ApprovalStage = 'project_manager' | 'finance' | 'gm' | 'owner'
@@ -26,6 +26,7 @@ export interface Profile {
   full_name: string
   role: Role
   department: string | null
+  assigned_project_ids?: string[]
   is_active: boolean
   avatar_initials: string
   must_change_password?: boolean
@@ -37,10 +38,10 @@ export interface Project {
   id: string
   name: string
   code: string
-  client_name: string | null
+  client_name?: string | null
   location?: string | null
   budget?: number | null
-  is_active: boolean
+  is_active?: boolean
   /** Approved or paid spend across the project's requests (filled on admin lists) */
   spent_amount: number
 }
@@ -79,12 +80,15 @@ export interface Vendor {
 export interface PurchaseItem {
   id: string
   purchase_request_id: string
+  /** Which of the request's projects this line is for */
+  project_id?: string
   name: string
   description?: string | null
   quantity: number
   unit: string
-  estimated_unit_price: number | null
-  quantity_received?: number
+  estimated_unit_price?: number | null
+  received_quantity?: number
+  quantity_remaining?: number
 }
 
 export interface VendorQuotation {
@@ -110,7 +114,9 @@ export interface Approval {
   decided_at: string | null
 }
 
-export type AttachmentType = 'proforma' | 'quotation' | 'invoice' | 'receipt' | 'delivery' | 'photo' | 'other'
+export type SupplierPaymentMethod = 'bank' | 'telebirr'
+
+export type AttachmentType = 'proforma' | 'invoice' | 'receipt' | 'delivery' | 'photo' | 'other'
 
 export interface PurchaseAttachment {
   id: string
@@ -130,26 +136,36 @@ export interface PurchaseRequest {
   id: string
   request_number: string
   title: string
-  description: string
+  description?: string
   project_id: string
   project?: Project
-  department: string
-  requester_id: string
-  requester?: Profile
-  required_date: string | null
-  estimated_amount: number
-  approved_amount: number | null
-  actual_amount: number | null
-  justification: string
-  status: RequestStatus
+  /** Every project the request buys for, primary first */
   project_ids?: string[]
-  projects?: Project[]
-  rejection_reason: string | null
+  projects?: Pick<Project, 'id' | 'name' | 'code'>[]
+  /** Share of the request's value per project id (0–1), from the item totals */
+  project_shares?: Record<string, number>
+  department?: string
+  vendor_name?: string
+  vendor_location?: string
+  proforma_amount?: number | null
+  /** Only sent to Finance, Admin and the requester */
+  supplier_payment_method?: SupplierPaymentMethod | ''
+  supplier_bank_name?: string
+  supplier_account_number?: string
+  requester_id?: string
+  requester?: Profile
+  required_date?: string | null
+  estimated_amount?: number
+  approved_amount?: number | null
+  actual_amount?: number | null
+  justification?: string
+  status: RequestStatus
+  rejection_reason?: string | null
   /** Set when an approver sends the request back for changes */
   return_note?: string | null
   submitted_at?: string | null
-  created_at: string
-  updated_at: string
+  created_at?: string
+  updated_at?: string
   items?: PurchaseItem[]
   quotations?: VendorQuotation[]
   approvals?: Approval[]

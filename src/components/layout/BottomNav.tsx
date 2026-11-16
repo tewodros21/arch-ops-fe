@@ -2,6 +2,7 @@ import { Link, NavLink, useLocation } from 'react-router-dom'
 import clsx from 'clsx'
 import { Menu, type LucideIcon } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
+import { useT } from '@/lib/i18n'
 import { createActionFor, NAV } from './nav'
 
 // Phones only: two destinations on each side and the page's create action raised in the middle.
@@ -9,6 +10,7 @@ import { createActionFor, NAV } from './nav'
 export function BottomNav({ onMore }: { onMore: () => void }) {
   const { profile } = useAuth()
   const { pathname } = useLocation()
+  const t = useT()
   if (!profile) return null
 
   const [home, purchases, labor] = NAV
@@ -21,8 +23,8 @@ export function BottomNav({ onMore }: { onMore: () => void }) {
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
       <div className="panel-dark grid h-16 grid-cols-5 items-center rounded-[1.5rem] px-1 shadow-[0_16px_40px_-16px_rgba(24,20,18,0.6)]">
-        <Tab to={home.to} label={home.short} icon={home.icon} end />
-        <Tab to={purchases.to} label={purchases.short} icon={purchases.icon} />
+        <Tab to={home.to} label={t(home.short)} icon={home.icon} end />
+        <Tab to={purchases.to} label={t(purchases.short)} icon={purchases.icon} />
 
         <div className="flex justify-center">
           {create && (
@@ -37,13 +39,13 @@ export function BottomNav({ onMore }: { onMore: () => void }) {
           )}
         </div>
 
-        <Tab to={labor.to} label={labor.short} icon={labor.icon} />
+        <Tab to={labor.to} label={t(labor.short)} icon={labor.icon} />
         <button
           onClick={onMore}
           className="focus-ring flex h-full flex-col items-center justify-center gap-1 rounded-2xl text-[11px] text-white/55 transition-colors active:text-white"
         >
           <Menu size={20} strokeWidth={1.75} />
-          More
+          {t('More')}
         </button>
       </div>
     </nav>

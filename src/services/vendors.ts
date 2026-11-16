@@ -24,7 +24,7 @@ export async function saveVendor(input: VendorInput, id?: string): Promise<{ dat
   return { data, error: error?.message ?? null }
 }
 
-/** Quotation history for a vendor, with the rival quotes on each request and the quotation files of requests it won */
+/** Legacy Proforma history for a vendor, including historical competing prices and files. */
 export async function fetchVendorHistory(vendorId: string): Promise<VendorHistory> {
   const { data, error } = await backend.vendors.history(vendorId)
   if (error) console.error(`Error fetching quotations for vendor ${vendorId}:`, error)

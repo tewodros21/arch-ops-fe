@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { format, isSameMonth, startOfMonth, subMonths } from 'date-fns'
 import type { PurchaseRequest, RequestStatus } from '@/types'
 import { ChartCard, EmptyChart, Legend, MoneyTooltip, RangeSelect } from './kit'
@@ -12,7 +12,7 @@ const SPEND_SERIES = [
 ] as const
 
 const STATUS_GROUPS: { label: string; statuses: RequestStatus[]; color: string; to: string }[] = [
-  { label: 'New', statuses: ['draft', 'quote_received'], color: COLORS.sand, to: '/requests' },
+  { label: 'New', statuses: ['draft', 'proforma_received'], color: COLORS.tan, to: '/requests' },
   { label: 'In review', statuses: IN_REVIEW, color: COLORS.sun, to: '/requests?status=review' },
   { label: 'Approved', statuses: ['approved'], color: COLORS.accent, to: '/requests?status=approved' },
   { label: 'Purchased & done', statuses: PAID, color: COLORS.ink, to: '/requests?status=done' },
@@ -46,9 +46,27 @@ function spendBy(requests: PurchaseRequest[], keyOf: (r: PurchaseRequest) => str
   return [...rows.values()].sort((a, b) => b.approved - a.approved).slice(0, TOP_N)
 }
 
+/** Multi-project requests split their value across projects by each project's share of the items */
+function spendByProject(requests: PurchaseRequest[]): SpendRow[] {
+  const rows = new Map<string, SpendRow>()
+  for (const r of requests) {
+    if (!DONE.includes(r.status)) continue
+    const names = new Map((r.projects ?? (r.project ? [r.project] : [])).map((p) => [p.id, p.name]))
+    const shares = r.project_shares && Object.keys(r.project_shares).length ? r.project_shares : { [r.project_id]: 1 }
+    for (const [id, share] of Object.entries(shares)) {
+      const key = names.get(id) ?? r.project?.name ?? 'No project'
+      const row = rows.get(key) ?? { name: shorten(key, 16), fullName: key, approved: 0, paid: 0 }
+      row.approved += approvedValue(r) * share
+      row.paid += paidValue(r) * share
+      rows.set(key, row)
+    }
+  }
+  return [...rows.values()].sort((a, b) => b.approved - a.approved).slice(0, TOP_N)
+}
+
 export function SpendCharts({ scoped, loading }: { scoped: PurchaseRequest[]; loading: boolean }) {
   const [trendMonths, setTrendMonths] = useState(6)
-  const byProject = spendBy(scoped, (r) => r.project?.name ?? 'No project', 16)
+  const byProject = spendByProject(scoped)
   const byDepartment = spendBy(scoped, (r) => r.department?.trim() || 'Unassigned', 12)
 
   // ── Monthly trend: approved value by month raised, paid value by month purchased ──
@@ -57,8 +75,11 @@ export function SpendCharts({ scoped, loading }: { scoped: PurchaseRequest[]; lo
   const trend = months.map((m) => ({
     month: format(m, 'MMM'),
     fullName: format(m, 'MMMM yyyy'),
-    approved: scoped.filter((r) => isSameMonth(new Date(r.created_at), m)).reduce((s, r) => s + approvedValue(r), 0),
-    paid: scoped.filter((r) => isSameMonth(new Date(r.updated_at ?? r.created_at), m)).reduce((s, r) => s + paidValue(r), 0),
+    approved: scoped.filter((r) => !!r.created_at && isSameMonth(new Date(r.created_at), m)).reduce((s, r) => s + approvedValue(r), 0),
+    paid: scoped.filter((r) => {
+      const updatedAt = r.updated_at ?? r.created_at
+      return !!updatedAt && isSameMonth(new Date(updatedAt), m)
+    }).reduce((s, r) => s + paidValue(r), 0),
   }))
   const trendApproved = trend.reduce((s, t) => s + t.approved, 0)
   const trendPaid = trend.reduce((s, t) => s + t.paid, 0)
@@ -123,23 +144,39 @@ export function SpendCharts({ scoped, loading }: { scoped: PurchaseRequest[]; lo
 
       {/* Requests by status */}
       <ChartCard title="Requests by status" subtitle={`${total} request${total === 1 ? '' : 's'} in total`}>
-        <div className="mt-5 flex h-3 gap-1">
+        <div className="mt-4 grid grid-cols-1 items-center gap-4 sm:grid-cols-[11rem_minmax(0,1fr)]">
+        <div className="relative mx-auto h-44 w-44" role="img" aria-label={`Requests by status: ${groups.map((g) => `${g.label} ${g.count}`).join(', ')}`}>
           {total === 0 ? (
-            <span className="h-full flex-1 rounded-full bg-[var(--cell)]" />
+            <div className="h-full w-full rounded-full border-[18px] border-[var(--cell)]" />
           ) : (
-            groups
-              .filter((g) => g.count > 0)
-              .map((g) => (
-                <span
-                  key={g.label}
-                  title={`${g.label} - ${g.count}`}
-                  className="h-full rounded-full transition-[flex-grow] duration-700"
-                  style={{ flexGrow: g.count, flexBasis: 0, background: g.color }}
-                />
-              ))
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={groups.filter((g) => g.count > 0)}
+                  dataKey="count"
+                  nameKey="label"
+                  innerRadius="62%"
+                  outerRadius="100%"
+                  startAngle={90}
+                  endAngle={-270}
+                  stroke="#fff"
+                  strokeWidth={2}
+                  animationDuration={700}
+                >
+                  {groups.filter((g) => g.count > 0).map((g) => (
+                    <Cell key={g.label} fill={g.color} />
+                  ))}
+                </Pie>
+                <Tooltip content={<StatusTooltip total={total} />} />
+              </PieChart>
+            </ResponsiveContainer>
           )}
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-3xl font-black text-[var(--ink)]">{total}</span>
+            <span className="text-xs text-slate-500">requests</span>
+          </div>
         </div>
-        <ul className="mt-5 divide-y divide-black/[0.06]">
+        <ul className="divide-y divide-black/[0.06]">
           {groups.map((g) => (
             <li key={g.label}>
               <Link to={g.to} className="focus-ring group flex items-center gap-3 rounded-lg py-2.5">
@@ -151,6 +188,7 @@ export function SpendCharts({ scoped, loading }: { scoped: PurchaseRequest[]; lo
             </li>
           ))}
         </ul>
+        </div>
       </ChartCard>
 
       {/* Monthly purchasing trend */}
@@ -189,6 +227,19 @@ export function SpendCharts({ scoped, loading }: { scoped: PurchaseRequest[]; lo
           </ResponsiveContainer>
         </div>
       </ChartCard>
+    </div>
+  )
+}
+
+function StatusTooltip({ active, payload, total }: { active?: boolean; payload?: { name: string; value: number; payload: { color: string } }[]; total: number }) {
+  if (!active || !payload?.length) return null
+  const entry = payload[0]
+  return (
+    <div className="rounded-xl bg-white px-3 py-2 text-xs text-[var(--ink)] shadow-[0_8px_24px_rgba(24,20,18,0.12)]">
+      <p className="flex items-center gap-2">
+        <span className="h-2 w-2 rounded-full" style={{ background: entry.payload.color }} />
+        {entry.name} - {entry.value} ({total ? Math.round((entry.value / total) * 100) : 0}%)
+      </p>
     </div>
   )
 }

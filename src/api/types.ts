@@ -10,6 +10,7 @@ import type {
   PurchaseRequest,
   RequestStatus,
   Role,
+  SupplierPaymentMethod,
   SiteEmployee,
   Vendor,
   VendorQuotation,
@@ -46,13 +47,17 @@ export interface RequestInput {
   description: string
   project_id: string
   project_ids: string[]
-  department: string
-  estimated_amount: number
+  vendor_name: string
+  vendor_location: string
+  supplier_payment_method: SupplierPaymentMethod | ''
+  supplier_bank_name: string
+  supplier_account_number: string
   justification: string
   required_date: string | null
 }
 
 export interface ItemInput {
+  project_id?: string | null
   name: string
   quantity: number
   unit: string
@@ -88,6 +93,7 @@ export interface ProfilePatch {
   is_active?: boolean
   has_all_projects?: boolean
   project_ids?: string[]
+  assigned_project_ids?: string[]
   password?: string
 }
 
@@ -99,6 +105,7 @@ export interface NewUserInput {
   password: string
   has_all_projects?: boolean
   project_ids?: string[]
+  assigned_project_ids?: string[]
 }
 
 export interface LaborInput {
@@ -113,7 +120,12 @@ export interface LaborInput {
 
 export type LaborPatch = Partial<Pick<LaborRequest, 'status' | 'assigned_to' | 'management_notes'>>
 
-export type Decision = 'approve' | 'reject' | 'return'
+export type Decision = 'approve' | 'reject'
+
+export interface ReceiptInput {
+  items: { purchase_item_id: string; quantity_received: number }[]
+  note?: string
+}
 
 // ── Read models ──────────────────────────────────────────────────────────────
 
@@ -216,6 +228,8 @@ export interface Backend {
     decide(id: string, decision: Decision, comment?: string | null, approvedAmount?: number | null): Promise<Result>
     recordPurchase(id: string, actualAmount: number): Promise<Result>
     updateReceivedItems(id: string, items: ItemReceiptInput[]): Promise<Result>
+    receive(id: string, input: ReceiptInput): Promise<Result>
+    complete(id: string): Promise<Result>
   }
 
   attachments: {

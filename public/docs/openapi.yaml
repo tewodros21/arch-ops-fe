@@ -14,7 +14,7 @@ info:
     - **IDs** are UUIDs. **Timestamps** are ISO 8601 with timezone. **Dates** are `YYYY-MM-DD`.
     - **Money and quantities are JSON numbers**, not strings (DRF: `COERCE_DECIMAL_TO_STRING = False`).
     - **Lists** are paginated `{ count, next, previous, results }` with `page` / `page_size` (default 50, max 500).
-      Comma-separated values are accepted for multi-value filters, e.g. `?status=awaiting_gm,awaiting_owner`.
+      Comma-separated values are accepted for multi-value filters, e.g. `?status=awaiting_pm,awaiting_finance`.
     - **Ordering** via `?ordering=field` or `?ordering=-field`.
     - **Nested reads, flat writes**: responses embed related objects (`project`, `requester`, `vendor` …) next to
       their `*_id`; request bodies only send the `*_id`.
@@ -31,41 +31,38 @@ info:
     3. The person signs in and changes it through `POST /auth/change-password/` before accessing the rest of the app.
        While `must_change_password` is true, the server restricts the session to authentication and password-change endpoints.
 
-    Admins create and update login users with `project_ids` and `has_all_projects`. Project Managers and Site Engineers
-    must have at least one assigned project or `has_all_projects: true`. Newly created users must change their
-    temporary password before using the app. User profiles return `must_change_password`, `project_ids` and
-    `has_all_projects`.
-
-    Site employees are separate from login users. Admins and Site Engineers manage them through
-    `/site-employees/`; they have no email, password or login role.
+    Admins edit name, role, department and project assignments with `PATCH /users/{id}/`, and remove access with
+    `is_active: false` (users are never deleted, so their history stays attributed). Department is not set when
+    creating users; admins can assign it later while editing a user.
 
     ## Roles
     | Role | Can do |
     |---|---|
-    | `admin` | Manage users, projects and site employees; may submit purchase requests |
-    | `ceo` | Manage projects |
-    | `project_manager` | Create requests; approve requests only for assigned projects (or all projects). Their own request skips Project Manager approval. |
-    | `site_engineer` | Manage departments and site employees; may submit requests for assigned projects |
-    | `finance` | Create requests; approve requests after Project Manager and record purchases. Their own request skips Finance approval. |
-    | `shopkeeper` | View purchased item names/quantities and report partial or complete receipts; no prices |
+    | `finance` | Final purchase approval; record purchases; manage vendors |
+    | `admin` | Everything except approving; manage users, roles and Project Manager assignments |
+    | `ceo` | Create purchase requests and projects; view submitted requests; not a purchase approver |
+    | `project_manager` | Create purchase/labor requests and review requests for assigned projects, except their own |
+    | `site_engineer` | Ashara role: create requests and see own/department requests |
+    | `shopkeeper` | Record partial item receipts and complete requests after all quantities arrive; no access to prices or purchase attachments |
 
-    Nobody may approve their own request. Only admins change roles.
+    Existing Employee, General Manager and Owner accounts are migrated to inactive Site Engineer accounts for admin
+    review. These retired roles are not available for new or active accounts.
+
+    Non-Project-Manager requests require approval from the Project Manager assigned to the request's project, then Finance.
+    A Project Manager's own requests skip the Project Manager stage and go directly to Finance. Nobody may approve their
+    own request. Only admins change roles and assign one Project Manager per project.
 
     ## Purchase request workflow
     ```
-    draft ──submit──▶ awaiting_gm (Project Manager) ──approve──▶ awaiting_finance (Finance) ──approve──▶ approved
-       ▲                    │                                │                                           │
-       └────── return ──────┴──────────── reject ────────────┴───────────────────────────────────────────┴──▶ rejected
-    approved ──record-purchase──▶ purchased (Shopkeeper receives partial quantities) ──all received──▶ completed
+    draft ──(upload Proforma)──▶ proforma_received ──submit──▶ awaiting_pm ──approve──▶ awaiting_finance
+                                                       │                         │
+                                                       └──────── reject ─────────┴──▶ rejected
+    Project Manager's own request: proforma_received ──submit──▶ awaiting_finance
+    awaiting_finance ──approve──▶ approved ──record-purchase──▶ purchased
+    purchased ──partial receipts──▶ partially_received ──all quantities received──▶ completed
     ```
-    Requests use shared vendors and one or more vendor quotations. Admins and Finance manage vendor records.
-    A request may include multiple `project_ids`; Project Managers can act only when assigned to at least one of them.
-    Admins, CEOs, Site Engineers, Project Managers and Finance may submit requests. When the requester is a Project Manager,
-    their Project Manager approval is recorded as approved automatically and the request starts at Finance. When the requester
-    is Finance, their Finance approval is recorded as approved automatically and the request proceeds to approved after
-    Project Manager approval. Automatic approvals are server-side workflow decisions and must appear in the approval trail;
-    do not notify the requester as an approver for their own automatic approval.
-    `awaiting_owner` and `quote_received` are legacy statuses and are not used in the current workflow.
+    Requests have one project in this phase. Each receipt can record part of one or more item quantities; cumulative
+    receipts cannot exceed ordered quantities. Only the Shopkeeper can record receipts or complete the request.
     `status` is **read-only** on every write endpoint; it only moves through the workflow actions, which run in one
     transaction each: check the role, update `approvals`, write an `AuditEvent`, create `Notification`s.
 
@@ -75,14 +72,14 @@ info:
     | Event | Audit `action` | Notify |
     |---|---|---|
     | Purchase request created / edited | `purchase_created` / `purchase_updated` | — |
-    | Submitted | `purchase_submitted` | Project Managers assigned to any request project (`review`); requester (`system`) |
-    | Project Manager approves | `gm_approved` | all `finance` users (`review`); requester (`approved`) |
-    | Finance approves | `finance_approved` | requester (`approved`); Finance can record the purchase |
+    | Submitted | `purchase_submitted` | assigned Project Manager or Finance (`review`); requester (`system`, unless they submitted it) |
+    | Project Manager approves | `project_manager_approved` | all `finance` (`review`); requester (`approved`) |
+    | Finance approves | `finance_approved` | requester (`approved`) |
     | Rejected | `rejected` | requester (`rejected`, body = reason) |
-    | Returned | `returned` | requester (`returned`, body = note) |
-    | Purchase recorded | `purchased` | Shopkeepers (`purchased`, ready for receiving); requester (`purchased`) |
-    | All quantities received | `completed` | requester (`approved`) |
-    | Labor requested | `labor_requested` | all `project_manager` + `admin` (`labor`) |
+    | Purchase recorded | `purchased` | requester (`purchased`); all `shopkeeper` (`purchased`, ready for receipt) |
+    | Receipt recorded | `items_partially_received` or `items_received` | requester, assigned Project Manager, Finance, and department Site Engineers (`system`) |
+    | Completed | `completed` | requester, assigned Project Manager, Finance, and department Site Engineers (`approved`) |
+    | Labor requested | `labor_requested` | admins (`labor`) |
     | Labor status / crew changed | `labor_<status>` / `labor_assigned` | requester (`labor`) |
     | Stalled approval (cron, e.g. 48 h) | — | the role that is due (`reminder`), once per window |
 
@@ -108,6 +105,7 @@ tags:
   - name: Vendors
   - name: Purchase requests
   - name: Purchase workflow
+  - name: Legacy Proformas
   - name: Attachments
   - name: Labor requests
   - name: Audit
@@ -271,7 +269,8 @@ paths:
       summary: Add a person (admin)
       description: |
         Admin only. Creates an active, ready-to-use account with the given temporary password; no email is sent.
-        The admin shares the password privately and the person changes it after signing in.
+        The admin shares the password privately and the person changes it after signing in. For a `project_manager`,
+        optional `assigned_project_ids` sets the projects they can access.
         `email` is stored lower-cased and must be unique (`409 conflict`). `avatar_initials` defaults to the
         first letters of `full_name`. Writes a `user_created` audit event (never include the password in it).
       operationId: usersCreate
@@ -306,7 +305,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [Users]
-      summary: Edit a user's name, role, department, project assignments or active flag (admin)
+      summary: Edit a user's profile, role, department, active flag or project assignments (admin)
       operationId: usersUpdate
       requestBody:
         required: true
@@ -345,7 +344,7 @@ paths:
               schema: { $ref: '#/components/schemas/PaginatedDepartments' }
     post:
       tags: [Departments]
-      summary: Create a department (site engineer)
+      summary: Create a department (admin)
       operationId: departmentsCreate
       requestBody:
         required: true
@@ -367,8 +366,8 @@ paths:
       - $ref: '#/components/parameters/Id'
     patch:
       tags: [Departments]
-      summary: Rename or archive a department (site engineer)
-      description: Renaming does not move site employees or past requests; they keep the old name until edited.
+      summary: Rename or archive a department (admin)
+      description: Renaming updates the department name shown for its related users. Existing purchase requests keep the department name recorded when they were created.
       operationId: departmentsUpdate
       requestBody:
         required: true
@@ -386,7 +385,7 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
     delete:
       tags: [Departments]
-      summary: Delete a department (site engineer)
+      summary: Delete a department (admin)
       operationId: departmentsDelete
       responses:
         '204': { description: Deleted }
@@ -491,7 +490,7 @@ paths:
               schema: { $ref: '#/components/schemas/PaginatedProjects' }
     post:
       tags: [Projects]
-      summary: Create a project (admin, ceo)
+      summary: Create a project (admin, CEO)
       operationId: projectsCreate
       requestBody:
         required: true
@@ -524,7 +523,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [Projects]
-      summary: Edit or archive a project (admin, ceo)
+      summary: Edit or archive a project (admin)
       operationId: projectsUpdate
       requestBody:
         required: true
@@ -542,7 +541,7 @@ paths:
         '409': { $ref: '#/components/responses/Conflict' }
     delete:
       tags: [Projects]
-      summary: Delete a project (admin, ceo)
+      summary: Delete a project (admin)
       description: Fails with `409 in_use` when any purchase or labor request points at it (`on_delete=PROTECT`).
       operationId: projectsDelete
       responses:
@@ -626,10 +625,10 @@ paths:
       - $ref: '#/components/parameters/Id'
     get:
       tags: [Vendors]
-      summary: Quotation history for a vendor
+      summary: Legacy Proforma history for a vendor
       description: |
-        Includes each quote this vendor gave on a request the caller can see (newest first), competing amounts on the
-        request, and quotation attachments for requests where this vendor's quote was selected.
+        Historical quotation records are exposed for compatibility. New purchase requests capture one vendor and
+        Proforma directly on the request instead.
       operationId: vendorsHistory
       responses:
         '200':
@@ -645,9 +644,10 @@ paths:
       tags: [Purchase requests]
       summary: List purchase requests
       description: |
-        Admins, Finance, Project Managers and CEOs can list requests. Shopkeepers see only purchased/completed requests
-        and receive item names and quantities without monetary fields. Site Engineers see their own requests.
-        Drafts (`draft`, `quote_received`) are visible only to their requester and admins.
+        Visibility is role-based: Finance, legacy management roles, CEO, and admins see submitted requests; Project
+        Project Managers see submitted requests for assigned projects; Site Engineers see submitted requests in their department;
+        Shopkeepers see only purchased/delivery requests. Drafts (`draft`, `proforma_received`) stay with their requester
+        and admins.
       operationId: purchaseRequestsList
       parameters:
         - $ref: '#/components/parameters/Page'
@@ -656,7 +656,7 @@ paths:
         - name: status
           in: query
           description: One or more statuses, comma separated
-          schema: { type: string, example: 'awaiting_finance,awaiting_gm' }
+          schema: { type: string, example: 'awaiting_pm,awaiting_finance' }
         - name: requester
           in: query
           description: A user id, or `me`
@@ -703,19 +703,22 @@ paths:
       - $ref: '#/components/parameters/Id'
     get:
       tags: [Purchase requests]
-      summary: Get a request with projects, items, quotations, approvals and attachments
+      summary: Get a request with items, Proforma, approvals and attachments
       operationId: purchaseRequestsRetrieve
       responses:
         '200':
           description: Request
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PurchaseRequestDetail' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/PurchaseRequestDetail' }
+                  - { $ref: '#/components/schemas/ShopkeeperPurchaseRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [Purchase requests]
       summary: Edit a draft
-      description: Requester only (or admin), and only while `draft` / legacy `quote_received`. `status` cannot be written.
+      description: Requester only (or admin), and only while `draft` / `proforma_received`. `status` cannot be written.
       operationId: purchaseRequestsUpdate
       requestBody:
         required: true
@@ -734,7 +737,7 @@ paths:
     delete:
       tags: [Purchase requests]
       summary: Delete a draft
-      description: Requester while `draft` / legacy `quote_received`, or admin. Items, approvals and attachments cascade.
+      description: Requester while `draft` / `proforma_received`, or admin. Items, Proforma, approvals and attachments cascade.
       operationId: purchaseRequestsDelete
       responses:
         '204': { description: Deleted }
@@ -776,9 +779,11 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Quotations]
-      summary: Add a vendor quotation
-      description: Requester while the request is editable; Finance and Admin can add quotes until purchasing is complete. Quote documents are uploaded separately as quotation attachments.
+      tags: [Legacy Proformas]
+      summary: Add a legacy vendor quotation
+      description: |
+        Legacy compatibility endpoint. New purchase requests use vendor fields and one Proforma attachment directly
+        on the request; this endpoint is retained to read and maintain historical quotation data.
       operationId: quotationsCreate
       requestBody:
         required: true
@@ -798,9 +803,9 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     delete:
-      tags: [Quotations]
-      summary: Remove a quotation
-      description: Same permissions as adding a quotation.
+      tags: [Legacy Proformas]
+      summary: Remove a legacy vendor quotation
+      description: Legacy compatibility endpoint. Same permissions as adding one.
       operationId: quotationsDelete
       responses:
         '204': { description: Deleted }
@@ -811,13 +816,13 @@ paths:
     parameters:
       - $ref: '#/components/parameters/Id'
     post:
-      tags: [Quotations]
-      summary: Mark the chosen quote
-      description: Selects this quote and clears selection from all other quotes on the request.
+      tags: [Legacy Proformas]
+      summary: Mark the chosen legacy quotation
+      description: Legacy compatibility endpoint. Sets `is_selected` on this record and clears it on other quotations for the request.
       operationId: quotationsSelect
       responses:
         '200':
-          description: Selected quotation
+          description: The selected legacy quotation
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VendorQuotation' }
@@ -830,15 +835,13 @@ paths:
       - $ref: '#/components/parameters/Id'
     post:
       tags: [Purchase workflow]
-      summary: Submit for Project Manager review
+      summary: Submit for Project Manager and Finance review
       description: |
-        `draft` → `awaiting_gm` normally. Requester only; caller must be an Admin, CEO, Site Engineer, Project Manager or
-        Finance. Requires at least one item and at least one vendor quotation. Resets `submitted_at`, `return_note` and
-        `rejection_reason`, and starts a pending `project_manager` approval. Site Engineers may submit only for
-        assigned projects unless they have `has_all_projects`; Project Managers have the same project assignment restriction.
-        If the requester is the Project Manager, record that approval as automatically approved and start at `awaiting_finance`.
-        If the requester is Finance, record the Finance approval as automatically approved; after Project Manager approval,
-        transition directly to `approved` without a second Finance decision.
+        Requester (or admin) only; needs at least one item, vendor name, vendor location, and a positive Proforma amount.
+        The Proforma attachment is optional. Non-Project-Manager requesters also need an active Project Manager assigned
+        to the project. Starts with that Project Manager, then Finance. Project Manager requesters skip their own stage
+        and go directly to Finance. Sets `submitted_at`, clears return/rejection notes, and creates the first pending
+        approval. Each request has one project.
       operationId: purchaseSubmit
       responses:
         '200':
@@ -852,7 +855,6 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
               examples:
-                details: { value: { detail: 'Add a supplier and at least one item before submitting', code: validation } }
                 already: { value: { detail: 'This request has already been submitted', code: validation } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
@@ -861,17 +863,14 @@ paths:
       - $ref: '#/components/parameters/Id'
     post:
       tags: [Purchase workflow]
-      summary: Approve, reject or return at the current stage
+      summary: Approve or reject at the current stage
       description: |
-        Only the role of the current stage may decide (`awaiting_gm` → project_manager, `awaiting_finance` → finance).
-        A requester whose role matches a stage is skipped via a server-recorded automatic approval; all other users may
-        not decide their own request. Project Managers may decide only requests containing an assigned project (unless
-        they have `has_all_projects`). CEO approval is not part of this workflow; `awaiting_owner` is legacy only.
+        Only the reviewer assigned to the current stage may decide (`awaiting_pm` → the assigned Project Manager,
+        `awaiting_finance` → Finance), and never on their own request.
 
-        - `approve`: marks the stage approved and moves to Finance after Project Manager, then to `approved` after Finance.
-          `approved_amount` (optional) may be set by Finance and defaults to `estimated_amount` when never set.
+        - `approve`: marks the stage approved and moves the request to the next stage, or `approved` after Finance.
+          Finance may set `approved_amount`; it defaults to `estimated_amount` if Finance omits it.
         - `reject`: `comment` required. Status `rejected`, `rejection_reason = comment`.
-        - `return`: `comment` required. Status returns to `draft`, `return_note = comment`, approvals cleared.
       operationId: purchaseDecide
       requestBody:
         required: true
@@ -905,7 +904,7 @@ paths:
     post:
       tags: [Purchase workflow]
       summary: Record the purchase
-      description: '`approved` → `purchased`. Finance only. Upload the receipt separately (type `receipt`). Shopkeepers can then record partial deliveries.'
+      description: '`approved` → `purchased`. Finance records the purchase; Shopkeeper is notified to track delivery.'
       operationId: purchaseRecord
       requestBody:
         required: true
@@ -930,25 +929,46 @@ paths:
       - $ref: '#/components/parameters/Id'
     post:
       tags: [Purchase workflow]
-      summary: Update received quantities
-      description: |
-        Shopkeeper only, and only after a purchase is recorded. Accepts the received quantity for each item; each value
-        must be between zero and the ordered quantity. `purchased` remains in progress while any item is short.
-        The server automatically changes status to `completed` when every item has been fully received.
-      operationId: purchaseReceive
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ReceiveItemsInput' }
+      summary: Mark delivered and complete
+      description: '`purchased` or `partially_received` → `completed`. Shopkeeper only, and only after all item quantities are received.'
+      operationId: purchaseComplete
       responses:
         '200':
           description: Updated request (money fields omitted for Shopkeepers)
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PurchaseRequestDetail' }
+              schema:
+                oneOf:
+                  - { $ref: '#/components/schemas/PurchaseRequestDetail' }
+                  - { $ref: '#/components/schemas/ShopkeeperPurchaseRequest' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '403': { $ref: '#/components/responses/Forbidden' }
+
+  /purchase-requests/{id}/receive/:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: [Purchase workflow]
+      summary: Record a partial or complete item receipt
+      description: |
+        Shopkeeper only. Available after the purchase is recorded. Each item may appear once per receipt; cumulative
+        received quantities cannot exceed the ordered quantity. The response is the Shopkeeper's redacted,
+        item-and-quantity-only request view.
+      operationId: purchaseReceive
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PurchaseReceiptInput' }
+      responses:
+        '200':
+          description: Request with updated received and remaining quantities
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ShopkeeperPurchaseRequest' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ── Attachments ───────────────────────────────────────────────────────────
   /purchase-requests/{id}/attachments/:
@@ -971,7 +991,8 @@ paths:
       tags: [Attachments]
       summary: Upload a document
       description: |
-        Users with request-document access (not Shopkeepers). Max **10 MB**; PDF, PNG, JPEG, WEBP, DOCX or XLSX only (check the content, not
+        Anyone who can see the request except Shopkeepers. Proforma uploads are limited to editable drafts; uploading
+        one moves a draft to `proforma_received`. Max **10 MB**; PDF, PNG, JPEG, WEBP, DOCX or XLSX only (check the content, not
         just the extension). Store under `<request id>/<random uuid>.<ext>` in private storage; keep the original name
         in `file_name`.
       operationId: attachmentsCreate
@@ -1096,7 +1117,7 @@ paths:
       tags: [Labor requests]
       summary: Move, assign or annotate a labor request
       description: |
-        Project Managers, CEOs and admins may change anything, moving forward through
+        Admins may change anything, moving forward through
         `requested → reviewed → assigned → in_progress → completed`, or to `cancelled` from any open status.
         The requester may only cancel while it is still `requested`.
       operationId: laborRequestsUpdate
@@ -1122,7 +1143,7 @@ paths:
       summary: Read the audit trail
       description: |
         Append-only; there are no write endpoints. Every signed-in user can read it (the dashboard activity heatmap
-        and the labor timeline use it for all roles); the full Audit Log page is only linked for CEO and admin.
+        and the labor timeline use it for all roles); the full Audit Log page is only linked for admins.
       operationId: auditEventsList
       parameters:
         - $ref: '#/components/parameters/Page'
@@ -1321,13 +1342,12 @@ components:
     # ── Enums ──
     Role:
       type: string
-      enum: [admin, ceo, project_manager, site_engineer, finance, shopkeeper]
+      enum: [finance, admin, ceo, project_manager, site_engineer, shopkeeper]
     RequestStatus:
       type: string
-      enum: [draft, quote_received, awaiting_finance, awaiting_gm, awaiting_owner, approved, rejected, purchased, completed]
+      enum: [draft, proforma_received, awaiting_pm, awaiting_finance, approved, rejected, purchased, partially_received, completed]
     ApprovalStage:
       type: string
-      description: Current stages are `project_manager`, then `finance`; `gm` and `owner` are legacy.
       enum: [project_manager, finance, gm, owner]
     ApprovalDecision:
       type: string
@@ -1337,7 +1357,7 @@ components:
       enum: [requested, reviewed, assigned, in_progress, completed, cancelled]
     AttachmentType:
       type: string
-      enum: [proforma, quotation, invoice, receipt, delivery, photo, other]
+      enum: [proforma, invoice, receipt, delivery, photo, other]
     NotificationKind:
       type: string
       enum: [review, approved, rejected, returned, purchased, labor, reminder, comment, system]
@@ -1379,13 +1399,18 @@ components:
     # ── Users ──
     User:
       type: object
-      required: [id, email, full_name, role, department, avatar_initials, must_change_password, has_all_projects, project_ids]
+      required: [id, email, full_name, role, department, assigned_project_ids, avatar_initials]
       properties:
         id: { type: string, format: uuid, readOnly: true }
         email: { type: string, format: email }
         full_name: { type: string, example: Hana Bekele }
         role: { $ref: '#/components/schemas/Role' }
         department: { type: string, nullable: true, description: 'Department name (matches Department.name)', example: Architecture }
+        assigned_project_ids:
+          type: array
+          readOnly: true
+          description: Projects assigned to this user when their role is project_manager
+          items: { type: string, format: uuid }
         avatar_initials: { type: string, maxLength: 4, example: HB }
         is_active: { type: boolean, readOnly: true }
         date_joined: { type: string, format: date-time, readOnly: true }
@@ -1408,9 +1433,9 @@ components:
         role: { $ref: '#/components/schemas/Role' }
         department: { type: string, nullable: true }
         is_active: { type: boolean }
-        has_all_projects: { type: boolean }
-        project_ids:
+        assigned_project_ids:
           type: array
+          description: Replace a Project Manager's assignments; send an empty array before changing the user to another role
           items: { type: string, format: uuid }
     UserCreate:
       type: object
@@ -1420,7 +1445,10 @@ components:
         full_name: { type: string, minLength: 1, maxLength: 150, example: Hana Bekele }
         password: { type: string, format: password, minLength: 8, description: 'Temporary password the admin shares; runs the Django password validators' }
         role: { allOf: [{ $ref: '#/components/schemas/Role' }], default: site_engineer }
-        department: { type: string, nullable: true }
+        assigned_project_ids:
+          type: array
+          description: Optional project IDs; non-empty only for a project_manager
+          items: { type: string, format: uuid }
         avatar_initials: { type: string, maxLength: 4 }
         has_all_projects: { type: boolean, default: false }
         project_ids:
@@ -1473,7 +1501,7 @@ components:
 
     Project:
       type: object
-      required: [id, name, code, client_name, location, is_active, created_at]
+      required: [id, name, code, client_name, location, budget, is_active, created_at, spent_amount, project_manager_ids]
       properties:
         id: { type: string, format: uuid, readOnly: true }
         name: { type: string, example: Riverside Office Renovation }
@@ -1483,7 +1511,11 @@ components:
         budget: { type: number, nullable: true, minimum: 0, example: 250000, description: Omitted for Shopkeepers }
         is_active: { type: boolean }
         created_at: { type: string, format: date-time, readOnly: true }
-        spent_amount: { type: number, readOnly: true, example: 48210.75, description: Omitted for Shopkeepers }
+        spent_amount: { type: number, readOnly: true, example: 48210.75 }
+        project_manager_ids:
+          type: array
+          readOnly: true
+          items: { type: string, format: uuid }
     ProjectInput:
       type: object
       required: [name, code]
@@ -1522,7 +1554,7 @@ components:
     # ── Purchase requests ──
     PurchaseItem:
       type: object
-      required: [id, name, quantity, unit, quantity_received]
+      required: [id, purchase_request_id, name, description, quantity, unit, estimated_unit_price, received_quantity, quantity_remaining]
       properties:
         id: { type: string, format: uuid, readOnly: true }
         purchase_request_id: { type: string, format: uuid, readOnly: true }
@@ -1531,8 +1563,34 @@ components:
         quantity: { type: number, example: 120 }
         quantity_received: { type: number, minimum: 0, description: Quantity received so far; zero before delivery }
         unit: { type: string, example: bag }
-        estimated_unit_price: { type: number, nullable: true, example: 14.5, description: Omitted for Shopkeepers }
+        estimated_unit_price: { type: number, nullable: true, example: 14.5 }
+        received_quantity: { type: number, readOnly: true, example: 35 }
+        quantity_remaining: { type: number, readOnly: true, example: 85 }
         created_at: { type: string, format: date-time, readOnly: true }
+    ShopkeeperPurchaseItem:
+      type: object
+      required: [id, name, quantity, unit, received_quantity, quantity_remaining]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        quantity: { type: number }
+        unit: { type: string }
+        received_quantity: { type: number, readOnly: true }
+        quantity_remaining: { type: number, readOnly: true }
+    PurchaseReceiptInput:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [purchase_item_id, quantity_received]
+            properties:
+              purchase_item_id: { type: string, format: uuid }
+              quantity_received: { type: number, exclusiveMinimum: true, minimum: 0 }
+        note: { type: string, maxLength: 500 }
     PurchaseItemInput:
       type: object
       required: [name, quantity]
@@ -1578,7 +1636,7 @@ components:
         attachment_type: { $ref: '#/components/schemas/AttachmentType' }
         file_path: { type: string, description: 'Storage key, e.g. <request id>/<uuid>.pdf' }
         file_url: { type: string, description: 'Same as file_path (kept for compatibility); open files via /attachments/{id}/download/' }
-        file_name: { type: string, description: 'Original file name', example: quote-addis-build.pdf }
+        file_name: { type: string, description: 'Original file name', example: proforma-addis-build.pdf }
         file_size: { type: integer, nullable: true, description: Bytes }
         description: { type: string, nullable: true }
         uploaded_by: { type: string, format: uuid, nullable: true }
@@ -1589,27 +1647,27 @@ components:
       type: object
       description: List shape (project(s) and requester embedded). Monetary fields are omitted for Shopkeepers.
       required:
-        [id, request_number, title, project_id, project, project_ids, projects, status, created_at, updated_at]
+        [id, request_number, title, description, project_id, project, department, vendor_name, vendor_location,
+         proforma_amount, requester_id, requester, required_date, estimated_amount, approved_amount, actual_amount,
+         justification, status, rejection_reason, return_note, submitted_at, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         request_number: { type: string, example: PR-2026-0013 }
         title: { type: string, example: Site office furniture }
         description: { type: string, description: Omitted for Shopkeepers }
         project_id: { type: string, format: uuid }
-        project: { allOf: [{ $ref: '#/components/schemas/Project' }], description: Budget/spend fields are omitted for Shopkeepers }
-        project_ids: { type: array, items: { type: string, format: uuid } }
-        projects:
-          type: array
-          description: Budget/spend fields are omitted for Shopkeepers
-          items: { $ref: '#/components/schemas/Project' }
-        department: { type: string, example: Architecture, description: Omitted for Shopkeepers }
-        requester_id: { type: string, format: uuid, description: Omitted for Shopkeepers }
-        requester: { allOf: [{ $ref: '#/components/schemas/User' }], description: Omitted for Shopkeepers }
-        required_date: { type: string, format: date, nullable: true, description: Omitted for Shopkeepers }
-        estimated_amount: { type: number, example: 4500, description: Omitted for Shopkeepers }
-        approved_amount: { type: number, nullable: true, description: Omitted for Shopkeepers }
-        actual_amount: { type: number, nullable: true, description: Omitted for Shopkeepers }
-        justification: { type: string, description: Omitted for Shopkeepers }
+        project: { $ref: '#/components/schemas/Project' }
+        department: { type: string, readOnly: true, description: Derived from the requester's department }
+        vendor_name: { type: string, description: Vendor name entered on the request }
+        vendor_location: { type: string, description: Vendor location entered on the request }
+        proforma_amount: { type: number, nullable: true, description: Hidden from Shopkeepers }
+        requester_id: { type: string, format: uuid }
+        requester: { $ref: '#/components/schemas/User' }
+        required_date: { type: string, format: date, nullable: true }
+        estimated_amount: { type: number, example: 4500 }
+        approved_amount: { type: number, nullable: true }
+        actual_amount: { type: number, nullable: true }
+        justification: { type: string }
         status: { $ref: '#/components/schemas/RequestStatus' }
         rejection_reason: { type: string, nullable: true, description: Omitted for Shopkeepers }
         return_note: { type: string, nullable: true, description: Set when an approver sent it back for changes; omitted for Shopkeepers }
@@ -1617,6 +1675,7 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     PurchaseRequestDetail:
+      description: Shopkeeper requests use the redacted ShopkeeperPurchaseRequest shape instead.
       allOf:
         - $ref: '#/components/schemas/PurchaseRequest'
         - type: object
@@ -1627,29 +1686,47 @@ components:
               items: { $ref: '#/components/schemas/PurchaseItem' }
             quotations:
               type: array
-              description: Vendor price comparisons; omitted for Shopkeepers.
+              description: Legacy historical quotation data, retained for compatibility
               items: { $ref: '#/components/schemas/VendorQuotation' }
             approvals:
               type: array
-              description: Current order is Project Manager, Finance; omitted for Shopkeepers.
+              description: Ordered Project Manager, Finance, then legacy historical stages
               items: { $ref: '#/components/schemas/Approval' }
             attachments:
               type: array
               description: Newest first, with `uploaded_by_profile`; omitted for Shopkeepers
               items: { $ref: '#/components/schemas/Attachment' }
+    ShopkeeperPurchaseRequest:
+      type: object
+      required: [id, request_number, title, status, project_id, project, vendor_name, vendor_location, items]
+      properties:
+        id: { type: string, format: uuid }
+        request_number: { type: string }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/RequestStatus' }
+        project_id: { type: string, format: uuid }
+        vendor_name: { type: string }
+        vendor_location: { type: string }
+        project:
+          type: object
+          required: [id, name, code]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            code: { type: string }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ShopkeeperPurchaseItem' }
     PurchaseRequestInput:
       type: object
-      required: [title, project_id, project_ids, department, estimated_amount]
+      required: [title, project_id]
       properties:
         title: { type: string, minLength: 1, maxLength: 200 }
         description: { type: string, default: '' }
         project_id: { type: string, format: uuid, description: Must be an active project }
-        project_ids:
-          type: array
-          minItems: 1
-          items: { type: string, format: uuid }
-          description: Active projects covered by this request; Project Managers must be assigned to at least one.
-        department: { type: string, minLength: 1 }
+        vendor_name: { type: string, maxLength: 200, description: Required before submission }
+        vendor_location: { type: string, maxLength: 255, description: Required before submission }
+        proforma_amount: { type: number, nullable: true, minimum: 0, description: Must be positive before submission; attachment is optional }
         estimated_amount: { type: number, minimum: 0 }
         justification: { type: string, default: '' }
         required_date: { type: string, format: date, nullable: true }
@@ -1670,9 +1747,9 @@ components:
       type: object
       required: [decision]
       properties:
-        decision: { type: string, enum: [approve, reject, return] }
-        comment: { type: string, nullable: true, description: Required for reject and return }
-        approved_amount: { type: number, nullable: true, minimum: 0, description: Approve only }
+        decision: { type: string, enum: [approve, reject] }
+        comment: { type: string, nullable: true, description: Required for reject }
+        approved_amount: { type: number, nullable: true, minimum: 0, description: Finance approval only }
 
     VendorRequestSummary:
       type: object

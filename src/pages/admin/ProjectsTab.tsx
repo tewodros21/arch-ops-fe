@@ -90,7 +90,7 @@ export function ProjectsTab() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full bg-[var(--ink)] px-2.5 py-0.5 text-[11px] font-semibold text-white">{p.code}</span>
                       <span className="md:hidden">
-                        <ActivePill active={p.is_active} />
+                        <ActivePill active={p.is_active ?? false} />
                       </span>
                     </div>
                     <p className="mt-1.5 truncate text-sm font-semibold text-[var(--ink)]">{p.name}</p>
@@ -126,7 +126,7 @@ export function ProjectsTab() {
                 </div>
 
                 <div className="hidden md:block">
-                  <ActivePill active={p.is_active} />
+                  <ActivePill active={p.is_active ?? false} />
                 </div>
 
                 <div className="flex justify-end gap-1.5">

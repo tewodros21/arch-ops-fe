@@ -13,7 +13,13 @@ import { SiteEmployeeFormModal } from '@/components/admin/SiteEmployeeFormModal'
 import { UserFormModal } from '@/components/admin/UserFormModal'
 import { VendorFormModal } from '@/components/admin/VendorFormModal'
 import { useAuth } from '@/context/AuthContext'
-import { DEPARTMENT_CREATED_EVENT, PROJECT_CREATED_EVENT, SITE_EMPLOYEE_CREATED_EVENT, USER_CREATED_EVENT, VENDOR_CREATED_EVENT } from '@/constants'
+import {
+  DEPARTMENT_CREATED_EVENT,
+  PROJECT_CREATED_EVENT,
+  SITE_EMPLOYEE_CREATED_EVENT,
+  USER_CREATED_EVENT,
+  VENDOR_CREATED_EVENT,
+} from '@/constants'
 
 const COLLAPSED_KEY = 'archops.sidebar-collapsed'
 
@@ -68,7 +74,7 @@ export function DashboardLayout() {
       {creating === 'request' && !editing && profile && ['site_engineer', 'admin', 'ceo', 'project_manager', 'finance'].includes(profile.role) && <NewRequestModal onClose={closeCreate} />}
       {editing && <NewRequestModal key={editing} editId={editing} onClose={closeCreate} />}
       {creating === 'labor' && <LaborRequestModal onClose={closeCreate} />}
-      {creating === 'project' && profile && (profile.role === 'admin' || profile.role === 'ceo') && (
+      {creating === 'project' && profile && profile.role === 'admin' && (
         <ProjectFormModal
           project={null}
           onClose={closeCreate}
@@ -78,7 +84,7 @@ export function DashboardLayout() {
       {creating === 'user' && profile?.role === 'admin' && (
         <UserFormModal onClose={closeCreate} onSaved={() => window.dispatchEvent(new Event(USER_CREATED_EVENT))} />
       )}
-      {creating === 'department' && profile?.role === 'site_engineer' && (
+      {creating === 'department' && profile && profile.role === 'admin' && (
         <DepartmentFormModal
           department={null}
           onClose={closeCreate}

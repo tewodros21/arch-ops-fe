@@ -46,8 +46,8 @@ export async function countPurchaseRequests(filter: PurchaseCountFilter): Promis
   return data ?? 0
 }
 
-export function fetchProjects() {
-  return backend.projects.list({ activeOnly: true })
+export function fetchProjects(activeOnly = true) {
+  return backend.projects.list({ activeOnly })
 }
 
 export async function fetchActiveVendors(): Promise<Vendor[]> {
@@ -72,7 +72,7 @@ export async function createPurchaseRequest(input: RequestInput): Promise<{ id: 
   return { id: data?.id ?? null, error: error?.message ?? null }
 }
 
-/** Only the requester's own draft or legacy quote_received requests can be edited; status is never touched here */
+/** Only the requester's own draft / proforma_received requests can be edited; status is never touched here */
 export async function updatePurchaseRequest(id: string, input: RequestInput): Promise<Result> {
   const { error } = await backend.purchases.update(id, input)
   return { error: error?.message ?? null }
@@ -85,12 +85,13 @@ export async function replaceItems(requestId: string, items: ItemInput[]): Promi
 
 export type QuoteInput = QuotationInput & { file: File | null }
 
+/** Legacy vendor-quotation helper retained for historical vendor records. */
 export async function addQuotation(requestId: string, quote: QuoteInput): Promise<Result & { fileError?: string | null }> {
   const { file, ...fields } = quote
   const { error } = await backend.purchases.addQuotation(requestId, fields)
   if (error) return { error: error.message }
   if (file) {
-    const { error: fileError } = await attachFile(requestId, file, 'quotation', 'Quotation from vendor')
+    const { error: fileError } = await attachFile(requestId, file, 'proforma', 'Supplier Proforma')
     return { error: null, fileError }
   }
   return { error: null }

@@ -1,5 +1,5 @@
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { Building2, FolderKanban, HardHat, ShieldCheck, Users } from 'lucide-react'
+import { Building2, FolderKanban, ShieldCheck, Users } from 'lucide-react'
 import { PageHeader } from '@/components/ui'
 import { useAuth } from '@/context/AuthContext'
 import type { Role } from '@/types'
@@ -11,10 +11,9 @@ import { SiteEmployeesTab } from './SiteEmployeesTab'
 type Tab = 'users' | 'projects' | 'departments' | 'site-employees'
 
 const TABS: { id: Tab; label: string; icon: typeof Users; roles: Role[]; subtitle: string }[] = [
-  { id: 'users', label: 'Users', icon: Users, roles: ['admin'], subtitle: 'Create accounts and assign projects for managers and site engineers' },
-  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin', 'ceo'], subtitle: 'Sites requests are raised against, with spend against budget' },
-  { id: 'departments', label: 'Departments', icon: Building2, roles: ['site_engineer'], subtitle: 'Site crew teams managed by the site engineer' },
-  { id: 'site-employees', label: 'Site employees', icon: HardHat, roles: ['admin', 'site_engineer'], subtitle: 'Manage site workers who do not need login accounts' },
+  { id: 'users', label: 'Users', icon: Users, roles: ['admin'], subtitle: 'Roles and departments decide who approves what' },
+  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin'], subtitle: 'Sites requests are raised against, with spend against budget' },
+  { id: 'departments', label: 'Departments', icon: Building2, roles: ['admin'], subtitle: 'Teams people and requests belong to' },
 ]
 
 export function Admin() {
