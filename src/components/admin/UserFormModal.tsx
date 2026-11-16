@@ -147,3 +147,50 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
     </FormModal>
   )
 }
+
+export function ProjectAssignmentField({
+  enabled,
+  projects,
+  selected,
+  onChange,
+}: {
+  enabled: boolean
+  projects: Project[]
+  selected: string[]
+  onChange: (ids: string[]) => void
+}) {
+  return (
+    <Field
+      label="Project Manager assignments"
+      htmlFor="u-projects"
+      hint={enabled ? 'Choose the project(s) this manager will review.' : 'Set the role to Project Manager above to assign review projects.'}
+    >
+      {!enabled ? (
+        <p className="rounded-xl bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink-soft)]">
+          Project assignments are only needed for Project Managers.
+        </p>
+      ) : projects.length === 0 ? (
+        <p className="rounded-xl bg-[var(--canvas)] px-3 py-2 text-sm text-[var(--ink-soft)]">No active projects available.</p>
+      ) : (
+        <div id="u-projects" className="max-h-40 space-y-2 overflow-y-auto rounded-2xl border border-black/10 p-3">
+          {projects.map((project) => (
+            <label key={project.id} className="flex items-center gap-2 text-sm text-[var(--ink)]">
+              <input
+                type="checkbox"
+                checked={selected.includes(project.id)}
+                onChange={(event) =>
+                  onChange(
+                    event.target.checked
+                      ? [...selected, project.id]
+                      : selected.filter((id) => id !== project.id),
+                  )
+                }
+              />
+              {project.name} <span className="text-xs text-slate-500">{project.code}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </Field>
+  )
+}

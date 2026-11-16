@@ -30,7 +30,7 @@ export function formatDuration(hours: number | null | undefined) {
 }
 
 export function isLaborManager(role: string | undefined) {
-  return role === 'admin'
+  return role === 'admin' || role === 'ceo'
 }
 
 export async function fetchLaborRequests(): Promise<LaborRequest[]> {

@@ -108,6 +108,19 @@ export function RequestDetail() {
   const req = request
   const role = profile?.role
   const isShopkeeper = role === 'shopkeeper'
+  if (isShopkeeper && !['purchased', 'partially_received', 'completed'].includes(req.status)) {
+    return (
+      <div className="rounded-[1.75rem] bg-white px-6 py-16 text-center">
+        <p className="text-2xl font-black text-[var(--ink)]">{t('Request not available')}</p>
+        <p className="mx-auto mt-3 max-w-md text-sm text-slate-500">
+          {t('Shopkeepers can view requests once Finance has purchased the items.')}
+        </p>
+        <Link to="/requests" className="mt-5 inline-block text-sm font-medium text-[var(--accent)] underline underline-offset-4">
+          {t('Back to requests')}
+        </Link>
+      </div>
+    )
+  }
   const isRequester = !!profile && profile.id === req.requester_id
   const myStage = role ? ROLE_STAGE[role] : null
   const currentStage = stageForStatus(req.status)

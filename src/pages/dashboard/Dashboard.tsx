@@ -24,14 +24,16 @@ import {
   type LaborRequest,
   type PurchaseRequest,
   type RequestStatus,
+  type Role,
 } from '@/types'
 
-const AWAITING_BY_ROLE: Record<string, RequestStatus | null> = {
+const AWAITING_BY_ROLE: Record<Role, RequestStatus | null> = {
+  admin: null,
   ceo: null,
   project_manager: 'awaiting_pm',
-  ceo: null,
   finance: 'awaiting_finance',
-  admin: null,
+  site_engineer: null,
+  shopkeeper: null,
 }
 
 const PIPELINE: { title: string; statuses: RequestStatus[] }[] = [
@@ -111,7 +113,9 @@ export function Dashboard() {
 
   if (!profile) return null
 
-  const scoped = requests
+  const scoped = profile.role === 'site_engineer'
+    ? requests.filter((request) => request.requester_id === profile.id)
+    : requests
   const awaitingStatus = AWAITING_BY_ROLE[profile.role]
   const priority = (awaitingStatus ? requests.filter((r) => r.status === awaitingStatus) : scoped.filter((r) => !DONE.includes(r.status) && r.status !== 'rejected'))
     .slice()

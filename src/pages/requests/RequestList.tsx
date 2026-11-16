@@ -64,6 +64,7 @@ export function RequestList() {
   const scoped = requests.filter((r) => {
     if (isShopkeeper) return ['purchased', 'partially_received', 'completed'].includes(r.status)
     const mine = r.requester_id === profile?.id
+    if (profile?.role === 'site_engineer') return mine
     if (EDITABLE_STATUSES.includes(r.status)) return mine || profile?.role === 'admin'
     return true
   })

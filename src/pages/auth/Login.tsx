@@ -9,7 +9,10 @@ import { AssetSlot } from '@/components/ui'
 const DEMO_PASSWORD = 'Demo!2026'
 
 const ROLES = [
+  { label: 'Site Engineer', email: 'se@demo.ethix.io', initials: 'SE' },
   { label: 'Finance', email: 'finance@demo.ethix.io', initials: 'FI' },
+  { label: 'Project Manager', email: 'pm@demo.ethix.io', initials: 'PM' },
+  { label: 'CEO', email: 'ceo@demo.ethix.io', initials: 'CE' },
   { label: 'Admin', email: 'admin@demo.ethix.io', initials: 'AD' },
 ]
 

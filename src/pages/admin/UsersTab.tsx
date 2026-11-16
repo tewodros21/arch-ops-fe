@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { Pencil, Plus, Power, Search, UserCog, UserPlus, Users } from 'lucide-react'
 import { Avatar, useConfirm } from '@/components/ui'
 import { Field, FormModal } from '@/components/admin/FormModal'
+import { ProjectAssignmentField } from '@/components/admin/UserFormModal'
 import { NEW_USER_SEARCH, USER_CREATED_EVENT } from '@/constants'
 import { useAuth } from '@/context/AuthContext'
 import { notify } from '@/lib/notify'
@@ -203,18 +204,14 @@ function EditPersonModal({ person, departments, onClose, onSaved }: { person: Pr
   const nameError = touched && !name.trim() ? 'Required' : null
 
   useEffect(() => {
-    fetchAllDepartments({ activeOnly: true }).then(({ data, error }) => {
+    fetchProjects(false).then(({ data, error }) => {
       if (error) {
-        console.error('Error fetching departments:', error)
-        notify.error('Could not load departments')
+        notify.error('Could not load projects for Project Manager assignment')
         return
       }
-      setDepartments(data ?? [])
+      setProjects(data ?? [])
     })
   }, [])
-
-  const availableProjects = projects.filter((p) => !projectIds.includes(p.id))
-  const selectedProjects = projects.filter((p) => projectIds.includes(p.id))
 
   async function submit() {
     setTouched(true)
@@ -238,11 +235,7 @@ function EditPersonModal({ person, departments, onClose, onSaved }: { person: Pr
       role,
       department: department || null,
       ...(role === 'project_manager' || person.role === 'project_manager'
-        ? {
-            assigned_project_ids: role === 'project_manager' ? assignedProjectIds : [],
-            project_ids: role === 'project_manager' ? assignedProjectIds : [],
-            has_all_projects: false,
-          }
+        ? { assigned_project_ids: role === 'project_manager' ? assignedProjectIds : [] }
         : {}),
     }
     const { data, error } = await updateProfile(person.id, patch)
