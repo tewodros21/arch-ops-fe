@@ -29,7 +29,7 @@ export interface Profile {
   assigned_project_ids?: string[]
   is_active: boolean
   avatar_initials: string
-  must_change_password?: boolean
+  must_change_password: boolean
   has_all_projects: boolean
   project_ids: string[]
 }
@@ -121,6 +121,7 @@ export type AttachmentType = 'proforma' | 'invoice' | 'receipt' | 'delivery' | '
 export interface PurchaseAttachment {
   id: string
   purchase_request_id: string
+  project_id?: string | null
   attachment_type: AttachmentType
   file_path: string
   file_url: string
@@ -130,6 +131,29 @@ export interface PurchaseAttachment {
   uploaded_by: string | null
   uploaded_by_profile?: Profile
   uploaded_at: string
+}
+
+export interface PurchaseProjectSupplier {
+  id?: string
+  project_id: string
+  project?: Pick<Project, 'id' | 'name' | 'code'>
+  supplier_name: string
+  supplier_address: string
+  supplier_phone: string
+  payment_method?: SupplierPaymentMethod | ''
+  bank_name?: string
+  account_number?: string
+}
+
+export interface PurchaseDuplicate {
+  id: string
+  purchase_request_id: string
+  request_number: string
+  title: string
+  status: RequestStatus
+  project_id: string
+  project_name: string
+  item_name: string
 }
 
 export interface PurchaseRequest {
@@ -152,6 +176,7 @@ export interface PurchaseRequest {
   supplier_payment_method?: SupplierPaymentMethod | ''
   supplier_bank_name?: string
   supplier_account_number?: string
+  project_suppliers?: PurchaseProjectSupplier[]
   requester_id?: string
   requester?: Profile
   required_date?: string | null

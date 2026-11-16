@@ -1,6 +1,6 @@
 import { backend, type ItemInput, type ItemReceiptInput, type PurchaseCountFilter, type QuotationInput, type RequestInput } from '@/api'
 import { attachFile } from '@/lib/storage'
-import type { Department, PurchaseRequest, Vendor } from '@/types'
+import type { Department, PurchaseDuplicate, PurchaseRequest, Vendor } from '@/types'
 
 export type { ItemInput, QuotationInput, RequestInput } from '@/api'
 
@@ -44,6 +44,14 @@ export async function loadPurchaseRequest(
 export async function countPurchaseRequests(filter: PurchaseCountFilter): Promise<number> {
   const { data } = await backend.purchases.count(filter)
   return data ?? 0
+}
+
+export async function fetchPurchaseDuplicates(
+  items: { project_id: string; name: string }[],
+  excludeRequestId?: string,
+): Promise<{ data: PurchaseDuplicate[]; error: string | null }> {
+  const { data, error } = await backend.purchases.checkDuplicates(items, excludeRequestId)
+  return { data: data ?? [], error: error?.message ?? null }
 }
 
 export function fetchProjects(activeOnly = true) {

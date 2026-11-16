@@ -12,13 +12,14 @@ import { ReviewTile, StepField as Field, StepModal, type Step } from '@/componen
 import {
   announcePurchaseSaved,
   createPurchaseRequest,
+  fetchPurchaseDuplicates,
   fetchProjects,
   fetchPurchaseRequestById,
   replaceItems,
   updatePurchaseRequest,
   type RequestInput,
 } from '@/services/requests'
-import { PAYMENT_METHOD_LABELS, type Project, type SupplierPaymentMethod } from '@/types'
+import { PAYMENT_METHOD_LABELS, type Project, type PurchaseDuplicate, type SupplierPaymentMethod } from '@/types'
 
 interface ItemRow {
   /** Which selected project the line is for; empty means the first selected project */
@@ -28,6 +29,24 @@ interface ItemRow {
   unit: string
   unit_price: string
   description: string
+}
+
+interface SupplierFields {
+  supplier_name: string
+  supplier_address: string
+  supplier_phone: string
+  payment_method: SupplierPaymentMethod | ''
+  bank_name: string
+  account_number: string
+}
+
+const EMPTY_SUPPLIER: SupplierFields = {
+  supplier_name: '',
+  supplier_address: '',
+  supplier_phone: '',
+  payment_method: '',
+  bank_name: '',
+  account_number: '',
 }
 
 const EMPTY_ITEM: ItemRow = { project_id: '', name: '', quantity: '1', unit: 'unit', unit_price: '', description: '' }
@@ -42,7 +61,7 @@ const STEPS: Step[] = [
   { title: 'Details', hint: 'What you need and for which projects' },
   { title: 'Items', hint: 'Items, quantities and unit prices' },
   { title: 'Total & timing', hint: 'Total from your items, due date and why' },
-  { title: 'Supplier & Proforma', hint: 'One supplier, payment details and optional Proforma' },
+  { title: 'Supplier & Proforma', hint: 'Supplier and required Proforma for each project' },
   { title: 'Review', hint: 'Save a draft or submit' },
 ]
 
@@ -68,21 +87,20 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const [loadingEdit, setLoadingEdit] = useState(editing)
   const [loadingProjects, setLoadingProjects] = useState(true)
   const [projectLoadFailed, setProjectLoadFailed] = useState(false)
+  const [duplicateMatches, setDuplicateMatches] = useState<PurchaseDuplicate[]>([])
+  const [duplicateCheckError, setDuplicateCheckError] = useState(false)
   const [touched, setTouched] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [items, setItems] = useState<ItemRow[]>([{ ...EMPTY_ITEM }])
-  const [proformaFile, setProformaFile] = useState<File | null>(null)
-  const [existingProforma, setExistingProforma] = useState<string | null>(null)
+  const [proformaFiles, setProformaFiles] = useState<Record<string, File | null>>({})
+  const [existingProformas, setExistingProformas] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
     title: '',
     description: '',
     /** Selected projects in the order picked; the first is the primary project */
     project_ids: [] as string[],
-    vendor_name: '',
-    vendor_location: '',
-    supplier_payment_method: '' as SupplierPaymentMethod | '',
-    supplier_bank_name: '',
-    supplier_account_number: '',
+    department: profile?.department ?? 'General',
+    suppliers: {} as Record<string, SupplierFields>,
     justification: '',
     required_date: '',
   })
@@ -113,6 +131,41 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     }
   }, [])
 
+  useEffect(() => {
+    if (step !== 1) return
+    const candidates = items
+      .filter((item) => item.name.trim())
+      .map((item) => ({ project_id: form.project_ids.includes(item.project_id) ? item.project_id : (form.project_ids[0] ?? ''), name: item.name.trim() }))
+      .filter((item) => item.project_id)
+    if (candidates.length === 0) {
+      setDuplicateMatches([])
+      setDuplicateCheckError(false)
+      return
+    }
+
+    setDuplicateMatches([])
+    setDuplicateCheckError(false)
+    let active = true
+    const timeout = window.setTimeout(() => {
+      void fetchPurchaseDuplicates(candidates, editId).then(({ data, error }) => {
+        if (!active) return
+        if (error) {
+          console.error('Could not check for duplicate purchase items:', error)
+          setDuplicateCheckError(true)
+          setDuplicateMatches([])
+          return
+        }
+        setDuplicateCheckError(false)
+        setDuplicateMatches(data)
+      })
+    }, 350)
+
+    return () => {
+      active = false
+      window.clearTimeout(timeout)
+    }
+  }, [step, items, form.project_ids, editId])
+
   // Edit mode: prefill from the saved request
   useEffect(() => {
     if (!editId || !profile) return
@@ -127,11 +180,27 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         title: r.title,
         description: r.description ?? '',
         project_ids: r.project_ids?.length ? r.project_ids : [r.project_id],
-        vendor_name: r.vendor_name ?? r.quotations?.[0]?.vendor?.name ?? '',
-        vendor_location: r.vendor_location ?? r.quotations?.[0]?.vendor?.address ?? '',
-        supplier_payment_method: r.supplier_payment_method ?? '',
-        supplier_bank_name: r.supplier_bank_name ?? '',
-        supplier_account_number: r.supplier_account_number ?? '',
+        department: r.department ?? profile.department ?? 'General',
+        suppliers: (r.project_suppliers ?? []).reduce<Record<string, SupplierFields>>((all, supplier) => {
+          all[supplier.project_id] = {
+            supplier_name: supplier.supplier_name ?? '',
+            supplier_address: supplier.supplier_address ?? '',
+            supplier_phone: supplier.supplier_phone ?? '',
+            payment_method: supplier.payment_method ?? '',
+            bank_name: supplier.bank_name ?? '',
+            account_number: supplier.account_number ?? '',
+          }
+          return all
+        }, {
+          [r.project_id]: {
+            ...EMPTY_SUPPLIER,
+            supplier_name: r.vendor_name ?? r.quotations?.[0]?.vendor?.name ?? '',
+            supplier_address: r.vendor_location ?? r.quotations?.[0]?.vendor?.address ?? '',
+            payment_method: r.supplier_payment_method ?? '',
+            bank_name: r.supplier_bank_name ?? '',
+            account_number: r.supplier_account_number ?? '',
+          },
+        }),
         justification: r.justification ?? '',
         required_date: r.required_date ?? '',
       })
@@ -147,7 +216,15 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             }))
           : [{ ...EMPTY_ITEM }],
       )
-      setExistingProforma(r.attachments?.find((a) => a.attachment_type === 'proforma')?.file_name ?? null)
+      const proformas: Record<string, string> = {}
+      for (const attachment of r.attachments ?? []) {
+        if (attachment.attachment_type === 'proforma') {
+          if (attachment.project_id || !r.project_suppliers?.length) {
+            proformas[attachment.project_id ?? r.project_id] = attachment.file_name
+          }
+        }
+      }
+      setExistingProformas(proformas)
       setLoadingEdit(false)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -163,11 +240,23 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     setItems((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
 
+  function updateSupplier(projectId: string, key: keyof SupplierFields, value: string) {
+    setTouched(true)
+    setForm((f) => ({
+      ...f,
+      suppliers: {
+        ...f.suppliers,
+        [projectId]: { ...(f.suppliers[projectId] ?? EMPTY_SUPPLIER), [key]: value },
+      },
+    }))
+  }
+
   function toggleProject(id: string) {
     setTouched(true)
     setForm((f) => ({
       ...f,
       project_ids: f.project_ids.includes(id) ? f.project_ids.filter((p) => p !== id) : [...f.project_ids, id],
+      suppliers: { ...f.suppliers, [id]: f.suppliers[id] ?? { ...EMPTY_SUPPLIER } },
     }))
   }
 
@@ -186,15 +275,31 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const itemsTotal = filledItems.reduce((sum, r) => sum + lineTotal(r), 0)
   const totalFor = (projectId: string) => filledItems.filter((r) => projectOf(r) === projectId).reduce((sum, r) => sum + lineTotal(r), 0)
   const emptyProject = multiProject ? selectedProjects.find((p) => !filledItems.some((r) => projectOf(r) === p.id)) : undefined
-  const hasVendorDetails = !!(form.vendor_name.trim() && form.vendor_location.trim())
-
-  const accountDigits = form.supplier_account_number.replace(/\D/g, '')
-  const paymentError =
-    form.supplier_account_number.trim() && !/^[\d\s+-]+$/.test(form.supplier_account_number.trim())
-      ? 'Use digits only for the account or Telebirr number'
-      : form.supplier_payment_method === 'telebirr' && accountDigits && (accountDigits.length < 9 || accountDigits.length > 12)
-        ? 'Enter a valid Telebirr phone number, e.g. 0912345678'
-        : null
+  const hasSupplierDetails = form.project_ids.length > 0 && form.project_ids.every((id) => {
+    const supplier = form.suppliers[id] ?? EMPTY_SUPPLIER
+    return !!(
+      supplier.supplier_name.trim()
+      && supplier.supplier_address.trim()
+      && supplier.supplier_phone.trim()
+      && supplier.payment_method
+      && supplier.account_number.trim()
+    )
+  })
+  const paymentError = selectedProjects.reduce<string | null>((error, project) => {
+    if (error) return error
+    const supplier = form.suppliers[project.id] ?? EMPTY_SUPPLIER
+    const account = supplier.account_number.trim()
+    const accountDigits = account.replace(/\D/g, '')
+    if (account && !/^[\d\s+-]+$/.test(account)) return `${project.name}: use digits only for the account or Telebirr number`
+    if (account && !supplier.payment_method) return `${project.name}: choose a payment method`
+    if (supplier.payment_method === 'telebirr' && account && (accountDigits.length < 9 || accountDigits.length > 12)) {
+      return `${project.name}: enter a valid Telebirr phone number, e.g. 0912345678`
+    }
+    return null
+  }, null)
+  const hasProformas = selectedProjects.length > 0 && selectedProjects.every((project) =>
+    !!(proformaFiles[project.id] || existingProformas[project.id]),
+  )
 
   const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || !(Number(r.unit_price) > 0))
   const projectError = loadingProjects
@@ -252,24 +357,46 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       notify.warning(stepErrors[firstInvalid]!)
       return
     }
-    if (submitAfter && !hasVendorDetails) {
+    if (submitAfter && !hasSupplierDetails) {
       setShowErrors(true)
       setStep(3)
-      notify.warning('Enter the supplier name and location')
+      notify.warning('Complete supplier, contact, and payment details for every selected project')
+      return
+    }
+    if (submitAfter && !hasProformas) {
+      setShowErrors(true)
+      setStep(3)
+      notify.warning('Upload a Proforma for every selected project')
       return
     }
     setBusy(true)
 
+    const primarySupplier = form.suppliers[form.project_ids[0]] ?? EMPTY_SUPPLIER
     const input: RequestInput = {
       title: form.title.trim(),
       description: form.description.trim(),
       project_id: form.project_ids[0],
       project_ids: form.project_ids,
-      vendor_name: form.vendor_name.trim(),
-      vendor_location: form.vendor_location.trim(),
-      supplier_payment_method: form.supplier_account_number.trim() ? form.supplier_payment_method : '',
-      supplier_bank_name: form.supplier_payment_method === 'bank' ? form.supplier_bank_name.trim() : '',
-      supplier_account_number: form.supplier_payment_method ? form.supplier_account_number.trim() : '',
+      department: form.department.trim() || 'General',
+      estimated_amount: itemsTotal,
+      proforma_amount: itemsTotal,
+      vendor_name: primarySupplier.supplier_name.trim(),
+      vendor_location: primarySupplier.supplier_address.trim(),
+      supplier_payment_method: primarySupplier.payment_method,
+      supplier_bank_name: primarySupplier.payment_method === 'bank' ? primarySupplier.bank_name.trim() : '',
+      supplier_account_number: primarySupplier.account_number.trim(),
+      project_suppliers: form.project_ids.map((project_id) => {
+        const supplier = form.suppliers[project_id] ?? EMPTY_SUPPLIER
+        return {
+          project_id,
+          supplier_name: supplier.supplier_name.trim(),
+          supplier_address: supplier.supplier_address.trim(),
+          supplier_phone: supplier.supplier_phone.trim(),
+          payment_method: supplier.payment_method,
+          bank_name: supplier.payment_method === 'bank' ? supplier.bank_name.trim() : '',
+          account_number: supplier.account_number.trim(),
+        }
+      }),
       justification: form.justification.trim(),
       required_date: form.required_date || null,
     }
@@ -304,17 +431,31 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         description: r.description.trim() || null,
       })),
     )
-    if (itemsError) notify.warning(`Line items were not saved: ${itemsError}`)
+    if (itemsError) {
+      setBusy(false)
+      notify.error(`Request saved, but line items could not be saved: ${itemsError}`)
+      announcePurchaseSaved(requestId)
+      navigate(`/requests/${requestId}`)
+      return
+    }
 
-    if (proformaFile) {
-      const { error } = await attachFile(requestId, proformaFile, 'proforma', 'Supplier Proforma')
+    for (const project of selectedProjects) {
+      const file = proformaFiles[project.id]
+      if (!file) continue
+      const { error } = await attachFile(
+        requestId,
+        file,
+        'proforma',
+        `Supplier Proforma - ${project.name}`,
+        project.id,
+      )
       if (error) {
         setBusy(false)
-        notify.error(`Request saved, but the Proforma could not be uploaded: ${error}`)
+        notify.error(`Request saved, but the Proforma for ${project.name} could not be uploaded: ${error}`)
         return
       }
-      setExistingProforma(proformaFile.name)
-      setProformaFile(null)
+      setExistingProformas((current) => ({ ...current, [project.id]: file.name }))
+      setProformaFiles((current) => ({ ...current, [project.id]: null }))
     }
 
     if (submitAfter) {
@@ -350,7 +491,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       onGoTo={goTo}
       onSubmit={() => save(true)}
       submitLabel="Submit for Finance review"
-      submitDisabled={!hasVendorDetails}
+      submitDisabled={!hasSupplierDetails || !hasProformas}
       secondaryAction={{ label: editing ? 'Save changes' : 'Save as draft', onClick: () => save(false) }}
       discardPrompt={editing ? 'Discard your changes?' : 'Discard this request?'}
       busy={busy}
@@ -580,6 +721,28 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </span>
             <span className="text-2xl font-black tracking-tight">{money(itemsTotal)}</span>
           </div>
+          {duplicateCheckError && (
+            <p role="status" className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-slate-600">
+              Could not check for similar requests right now. You can continue, but please review the request list for possible duplicates.
+            </p>
+          )}
+          {duplicateMatches.length > 0 && (
+            <div role="status" className="rounded-[1.5rem] border border-[var(--sun)] bg-[var(--sun-soft)] p-4">
+              <p className="text-sm font-bold text-[var(--ink)]">Possible duplicate items found</p>
+              <p className="mt-1 text-xs text-[var(--ink-soft)]">This is a warning only; you can still submit the request.</p>
+              <ul className="mt-3 space-y-2">
+                {duplicateMatches.slice(0, 5).map((match) => (
+                  <li key={`${match.id}-${match.project_id}`} className="text-sm text-[var(--ink)]">
+                    <span className="font-semibold">{match.item_name}</span> for {match.project_name} already appears in{' '}
+                    <span className="font-semibold">{match.request_number}</span> ({match.title}, {match.status.replace(/_/g, ' ')}).
+                  </li>
+                ))}
+                {duplicateMatches.length > 5 && (
+                  <li className="text-xs text-[var(--ink-soft)]">{duplicateMatches.length - 5} more possible matches</li>
+                )}
+              </ul>
+            </div>
+          )}
         </>
       )}
 
@@ -631,82 +794,115 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       {!loadingEdit && step === 3 && (
         <>
           <p className="text-sm text-[var(--ink-soft)]">
-            Enter the supplier details and Proforma amount. Attaching the Proforma document is optional.
+            Enter supplier contact and payment details and attach a Proforma for each selected project.
           </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Supplier name">
-              <input
-                value={form.vendor_name}
-                onChange={(e) => update('vendor_name', e.target.value)}
-                placeholder="Supplier or company name"
-                className={clsx(inputClass, 'border-transparent')}
-              />
-            </Field>
-            <Field label="Supplier location">
-              <input
-                value={form.vendor_location}
-                onChange={(e) => update('vendor_location', e.target.value)}
-                placeholder="City, site, or address"
-                className={clsx(inputClass, 'border-transparent')}
-              />
-            </Field>
-          </div>
-          <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
-            Proforma amount: <span className="font-semibold text-[var(--ink)]">{money(itemsTotal)}</span>, the total of your items.
-          </p>
-          <Field label="Payment details for Finance" optional>
-            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Payment method">
-              {(Object.keys(PAYMENT_METHOD_LABELS) as SupplierPaymentMethod[]).map((method) => {
-                const active = form.supplier_payment_method === method
-                return (
-                  <button
-                    key={method}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => update('supplier_payment_method', active ? '' : method)}
-                    className={clsx(
-                      'focus-ring rounded-2xl border px-4 py-3 text-sm font-medium transition-colors',
-                      active ? 'border-[var(--ink)] bg-[var(--ink)] text-white' : 'border-black/10 text-[var(--ink)] hover:border-black/30',
-                    )}
-                  >
-                    {PAYMENT_METHOD_LABELS[method]}
-                  </button>
-                )
-              })}
-            </div>
-            {form.supplier_payment_method && (
-              <div className={clsx('mt-2 grid grid-cols-1 gap-2', form.supplier_payment_method === 'bank' && 'sm:grid-cols-2')}>
-                {form.supplier_payment_method === 'bank' && (
-                  <input
-                    value={form.supplier_bank_name}
-                    onChange={(e) => update('supplier_bank_name', e.target.value)}
-                    placeholder="Bank name, e.g. CBE"
-                    aria-label="Bank name"
-                    className={clsx(inputClass, 'border-transparent')}
-                  />
+          {selectedProjects.map((project) => {
+            const supplier = form.suppliers[project.id] ?? EMPTY_SUPPLIER
+            const projectPaymentError = paymentError?.startsWith(`${project.name}:`) ? paymentError : null
+            return (
+              <section key={project.id} className="space-y-3 rounded-[1.5rem] border border-black/10 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-[var(--ink)]">
+                    <Building2 size={16} className="shrink-0 text-[var(--accent)]" />
+                    <span className="truncate">{project.name}</span>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-[var(--ink)]">{money(totalFor(project.id))}</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Supplier name">
+                    <input
+                      value={supplier.supplier_name}
+                      onChange={(e) => updateSupplier(project.id, 'supplier_name', e.target.value)}
+                      placeholder="Supplier or company name"
+                      className={clsx(inputClass, 'border-transparent')}
+                    />
+                  </Field>
+                  <Field label="Supplier address">
+                    <input
+                      value={supplier.supplier_address}
+                      onChange={(e) => updateSupplier(project.id, 'supplier_address', e.target.value)}
+                      placeholder="City, site, or address"
+                      className={clsx(inputClass, 'border-transparent')}
+                    />
+                  </Field>
+                  <Field label="Supplier contact phone">
+                    <input
+                      type="tel"
+                      value={supplier.supplier_phone}
+                      onChange={(e) => updateSupplier(project.id, 'supplier_phone', e.target.value)}
+                      placeholder="Supplier phone number"
+                      className={clsx(inputClass, 'border-transparent')}
+                    />
+                  </Field>
+                </div>
+                <Field label="Payment details for Finance">
+                  <div className="grid grid-cols-2 gap-2" role="group" aria-label={`Payment method for ${project.name}`}>
+                    {(Object.keys(PAYMENT_METHOD_LABELS) as SupplierPaymentMethod[]).map((method) => {
+                      const active = supplier.payment_method === method
+                      return (
+                        <button
+                          key={method}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => updateSupplier(project.id, 'payment_method', active ? '' : method)}
+                          className={clsx(
+                            'focus-ring rounded-2xl border px-4 py-3 text-sm font-medium transition-colors',
+                            active ? 'border-[var(--ink)] bg-[var(--ink)] text-white' : 'border-black/10 text-[var(--ink)] hover:border-black/30',
+                          )}
+                        >
+                          {PAYMENT_METHOD_LABELS[method]}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {supplier.payment_method && (
+                    <div className={clsx('mt-2 grid grid-cols-1 gap-2', supplier.payment_method === 'bank' && 'sm:grid-cols-2')}>
+                      {supplier.payment_method === 'bank' && (
+                        <input
+                          value={supplier.bank_name}
+                          onChange={(e) => updateSupplier(project.id, 'bank_name', e.target.value)}
+                          placeholder="Bank name, e.g. CBE"
+                          aria-label={`Bank name for ${project.name}`}
+                          className={clsx(inputClass, 'border-transparent')}
+                        />
+                      )}
+                      <input
+                        value={supplier.account_number}
+                        onChange={(e) => updateSupplier(project.id, 'account_number', e.target.value)}
+                        inputMode="numeric"
+                        placeholder={supplier.payment_method === 'bank' ? 'Account number' : 'Telebirr phone number, e.g. 0912345678'}
+                        aria-label={supplier.payment_method === 'bank' ? `Account number for ${project.name}` : `Telebirr number for ${project.name}`}
+                        className={clsx(inputClass, err(3, !!projectPaymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
+                      />
+                    </div>
+                  )}
+                  {err(3, !!projectPaymentError) && (
+                    <p className="mt-2 text-xs font-medium text-[var(--accent)]">{projectPaymentError}</p>
+                  )}
+                  <p className="mt-2 text-xs text-slate-500">Only Finance, Admin, and the requester can see payment details.</p>
+                </Field>
+                {existingProformas[project.id] && (
+                  <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                    Attached Proforma: <span className="font-semibold text-[var(--ink)]">{existingProformas[project.id]}</span>
+                  </p>
                 )}
-                <input
-                  value={form.supplier_account_number}
-                  onChange={(e) => update('supplier_account_number', e.target.value)}
-                  inputMode="numeric"
-                  placeholder={form.supplier_payment_method === 'bank' ? 'Account number' : 'Telebirr phone number, e.g. 0912345678'}
-                  aria-label={form.supplier_payment_method === 'bank' ? 'Account number' : 'Telebirr number'}
-                  className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
-                />
-              </div>
-            )}
-            {err(3, !!paymentError) && <p className="mt-2 text-xs font-medium text-[var(--accent)]">{paymentError}</p>}
-            <p className="mt-2 text-xs text-slate-500">Only Finance and Admin can see these details. Finance uses them to transfer the payment.</p>
-          </Field>
-          {existingProforma && !proformaFile && (
-            <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
-              Attached Proforma: <span className="font-semibold text-[var(--ink)]">{existingProforma}</span>
-            </p>
-          )}
-          <DropZone file={proformaFile} onFile={(file) => {
-            setTouched(true)
-            setProformaFile(file)
-          }} />
+                <Field label={`Proforma for ${project.name}`}>
+                  <DropZone
+                    file={proformaFiles[project.id] ?? null}
+                    onFile={(file) => {
+                      setTouched(true)
+                      setProformaFiles((current) => ({ ...current, [project.id]: file }))
+                    }}
+                  />
+                </Field>
+              </section>
+            )
+          })}
+          {paymentError && <p role="alert" className="text-sm font-medium text-[var(--accent)]">{paymentError}</p>}
+          <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+            Each selected project needs its own supplier details and Proforma. Project line totals add up to{' '}
+            <span className="font-semibold text-[var(--ink)]">{money(itemsTotal)}</span>.
+          </p>
         </>
       )}
 
@@ -737,15 +933,15 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             <ReviewTile
               label="Pay to"
               value={
-                form.supplier_payment_method && form.supplier_account_number.trim()
-                  ? `${PAYMENT_METHOD_LABELS[form.supplier_payment_method]} · ${form.supplier_account_number.trim()}`
-                  : 'Not provided'
+                hasSupplierDetails
+                  ? `${selectedProjects.length} project supplier${selectedProjects.length === 1 ? '' : 's'}`
+                  : 'Incomplete'
               }
               onEdit={() => setStep(3)}
             />
             <ReviewTile
               label="Supplier / Proforma"
-              value={hasVendorDetails ? `${form.vendor_name} · ${money(itemsTotal)}` : 'Incomplete'}
+              value={hasSupplierDetails && hasProformas ? `${selectedProjects.length} Proforma${selectedProjects.length === 1 ? '' : 's'} attached` : 'Incomplete'}
               onEdit={() => setStep(3)}
             />
           </div>
@@ -776,13 +972,13 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </div>
           )}
 
-          {!hasVendorDetails ? (
+          {!hasSupplierDetails || !hasProformas ? (
             <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--accent-soft)] p-4 text-sm text-[var(--ink)]">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[var(--accent)]">
                 <Info size={16} />
               </span>
               <span>
-                Add the supplier name and location to submit. The Proforma document is optional.{' '}
+                Complete each project's supplier, contact, payment details, and upload its Proforma to submit.{' '}
                 <button type="button" onClick={() => setStep(3)} className="font-semibold underline underline-offset-2">
                   Complete supplier details
                 </button>{' '}
@@ -798,7 +994,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 {profile?.role === 'project_manager'
                   ? 'Submitting sends this request directly to Finance for review.'
                   : 'Submitting sends this request to the assigned Project Manager, then Finance.'}
-                {!proformaFile && !existingProforma && ' You can submit without the Proforma document.'}
+                {' '}Each project's Proforma is attached to the request.
               </span>
             </div>
           )}

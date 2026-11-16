@@ -12,7 +12,7 @@ type Tab = 'users' | 'projects' | 'departments' | 'site-employees'
 
 const TABS: { id: Tab; label: string; icon: typeof Users; roles: Role[]; subtitle: string }[] = [
   { id: 'users', label: 'Users', icon: Users, roles: ['admin'], subtitle: 'Roles and departments decide who approves what' },
-  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin'], subtitle: 'Sites requests are raised against, with spend against budget' },
+  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin', 'ceo'], subtitle: 'Sites requests are raised against, with spend against budget' },
   { id: 'departments', label: 'Departments', icon: Building2, roles: ['admin'], subtitle: 'Teams people and requests belong to' },
 ]
 
@@ -43,7 +43,7 @@ export function Admin() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title={profile.role === 'site_engineer' ? 'Site setup' : 'Admin'} subtitle={current.subtitle} />
+      <PageHeader title={profile.role === 'ceo' ? 'Projects' : profile.role === 'site_engineer' ? 'Site setup' : 'Admin'} subtitle={current.subtitle} />
 
       <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
         {allowed.map((t) => (

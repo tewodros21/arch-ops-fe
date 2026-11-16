@@ -13,6 +13,7 @@ import { SiteEmployeeFormModal } from '@/components/admin/SiteEmployeeFormModal'
 import { UserFormModal } from '@/components/admin/UserFormModal'
 import { VendorFormModal } from '@/components/admin/VendorFormModal'
 import { useAuth } from '@/context/AuthContext'
+import { canCreatePurchaseRequest } from '@/lib/workflow'
 import {
   DEPARTMENT_CREATED_EVENT,
   PROJECT_CREATED_EVENT,
@@ -71,10 +72,10 @@ export function DashboardLayout() {
         </div>
       </div>
       <BottomNav onMore={() => setNavOpen(true)} />
-      {creating === 'request' && !editing && profile && ['site_engineer', 'admin', 'ceo', 'project_manager', 'finance'].includes(profile.role) && <NewRequestModal onClose={closeCreate} />}
+      {creating === 'request' && !editing && canCreatePurchaseRequest(profile?.role) && <NewRequestModal onClose={closeCreate} />}
       {editing && <NewRequestModal key={editing} editId={editing} onClose={closeCreate} />}
       {creating === 'labor' && <LaborRequestModal onClose={closeCreate} />}
-      {creating === 'project' && profile && profile.role === 'admin' && (
+      {creating === 'project' && profile && ['admin', 'ceo'].includes(profile.role) && (
         <ProjectFormModal
           project={null}
           onClose={closeCreate}

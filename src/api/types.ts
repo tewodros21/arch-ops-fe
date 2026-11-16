@@ -5,6 +5,7 @@ import type {
   Department,
   LaborRequest,
   PurchaseAttachment,
+  PurchaseDuplicate,
   Profile,
   Project,
   PurchaseRequest,
@@ -47,11 +48,23 @@ export interface RequestInput {
   description: string
   project_id: string
   project_ids: string[]
+  department: string
+  estimated_amount: number
+  proforma_amount: number
   vendor_name: string
   vendor_location: string
   supplier_payment_method: SupplierPaymentMethod | ''
   supplier_bank_name: string
   supplier_account_number: string
+  project_suppliers: {
+    project_id: string
+    supplier_name: string
+    supplier_address: string
+    supplier_phone: string
+    payment_method: SupplierPaymentMethod | ''
+    bank_name: string
+    account_number: string
+  }[]
   justification: string
   required_date: string | null
 }
@@ -215,6 +228,10 @@ export interface Backend {
     /** With items, quotations (+vendor), approvals (+reviewer) and attachments (+uploader) */
     get(id: string): Promise<Result<PurchaseRequest>>
     count(filter: PurchaseCountFilter): Promise<Result<number>>
+    checkDuplicates(
+      items: { project_id: string; name: string }[],
+      excludeRequestId?: string,
+    ): Promise<Result<PurchaseDuplicate[]>>
     /** Always a draft for the signed-in user; the request number is assigned by the server */
     create(input: RequestInput): Promise<Result<{ id: string }>>
     update(id: string, input: RequestInput): Promise<Result>
@@ -233,7 +250,7 @@ export interface Backend {
   }
 
   attachments: {
-    upload(requestId: string, file: File, type: AttachmentType, description?: string): Promise<Result>
+    upload(requestId: string, file: File, type: AttachmentType, description?: string, projectId?: string): Promise<Result>
     /** A short-lived link to open the file */
     url(attachment: Pick<PurchaseAttachment, 'id' | 'file_path' | 'file_url'>): Promise<Result<string>>
   }

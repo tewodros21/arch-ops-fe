@@ -1,14 +1,26 @@
 import { API_BASE_URL } from './config'
 import type { ApiError, ErrorCode, Result } from './types'
 
-// Fetch client for the Django REST API: cookie session auth + CSRF, DRF page-number
+// Fetch client for the Django REST API: JWT bearer auth, DRF page-number
 // pagination, and DRF error bodies mapped to ApiError.
 
 const SESSION_FLAG_KEY = 'archops.signedIn'
+const ACCESS_TOKEN_KEY = 'archops.access'
+const REFRESH_TOKEN_KEY = 'archops.refresh'
 const PAGE_SIZE = 200
 
-/** Per-tab signed-in flag only (the real session lives in the httpOnly cookie) */
+/** Keep authentication scoped to this tab and across page reloads. */
 const flagStore: Storage | null = typeof window !== 'undefined' ? window.sessionStorage : null
+function readStoredToken(key: string) {
+  try {
+    return flagStore?.getItem(key) ?? null
+  } catch {
+    return null
+  }
+}
+
+let accessJwt = readStoredToken(ACCESS_TOKEN_KEY)
+let refreshJwt = readStoredToken(REFRESH_TOKEN_KEY)
 
 export interface Page<T> {
   count: number
@@ -24,7 +36,7 @@ interface Options {
   query?: Query
   body?: unknown
   form?: FormData
-  /** false for csrf / login, which must work without an existing session */
+  /** false for public endpoints such as login and token refresh */
   auth?: boolean
 }
 
@@ -44,9 +56,27 @@ export function hasSession() {
   return readSignedInFlag()
 }
 
+function storeTokens(access: string | null, refresh: string | null) {
+  accessJwt = access
+  refreshJwt = refresh
+  try {
+    if (access) flagStore?.setItem(ACCESS_TOKEN_KEY, access)
+    else flagStore?.removeItem(ACCESS_TOKEN_KEY)
+    if (refresh) flagStore?.setItem(REFRESH_TOKEN_KEY, refresh)
+    else flagStore?.removeItem(REFRESH_TOKEN_KEY)
+  } catch {
+    // Keep tokens in memory when browser storage is unavailable.
+  }
+}
+
+export function getRefreshToken() {
+  return refreshJwt
+}
+
 /** Marks this tab signed in/out and notifies listeners when the flag flips */
 export function setSession(signedIn: boolean, opts?: { quiet?: boolean }) {
   const wasSignedIn = readSignedInFlag()
+  if (!signedIn) storeTokens(null, null)
   try {
     if (signedIn) flagStore?.setItem(SESSION_FLAG_KEY, '1')
     else flagStore?.removeItem(SESSION_FLAG_KEY)
@@ -66,14 +96,18 @@ export function onSessionChange(listener: (signedIn: boolean) => void) {
   }
 }
 
-/** @deprecated Kept for call-site compatibility; session auth has no refresh token */
+/** @deprecated Prefer setTokens */
 export function refreshToken(): null {
   return null
 }
 
-/** @deprecated Use setSession */
 export function setTokens(tokens: { access?: string; refresh?: string } | null, opts?: { quiet?: boolean }) {
-  setSession(!!tokens, opts)
+  if (!tokens?.access || !tokens.refresh) {
+    setSession(false, opts)
+    return
+  }
+  storeTokens(tokens.access, tokens.refresh)
+  setSession(true, opts)
 }
 
 /**
@@ -89,6 +123,7 @@ function dropAuthClonedFromOpener() {
       return
     }
     flagStore?.removeItem(SESSION_FLAG_KEY)
+    storeTokens(null, null)
   } catch {
     // ignore
   }
@@ -101,39 +136,6 @@ if (typeof window !== 'undefined') {
     // ignore
   }
   dropAuthClonedFromOpener()
-}
-
-// ── CSRF ─────────────────────────────────────────────────────────────────────
-
-function readCookie(name: string) {
-  if (typeof document === 'undefined') return null
-  const match = document.cookie.match(new RegExp(`(?:^|; )${name.replace(/[$()*+.?[\\\]^{|}]/g, '\\$&')}=([^;]*)`))
-  return match ? decodeURIComponent(match[1]) : null
-}
-
-let csrfReady: Promise<string | null> | null = null
-
-/** Ensures the csrftoken cookie exists and returns its value */
-export async function ensureCsrf(): Promise<string | null> {
-  const existing = readCookie('csrftoken')
-  if (existing) return existing
-  csrfReady ??= (async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/auth/csrf/`, {
-        method: 'GET',
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-      })
-      if (!res.ok) return readCookie('csrftoken')
-      const data = (await res.json()) as { csrfToken?: string }
-      return data.csrfToken ?? readCookie('csrftoken')
-    } catch {
-      return readCookie('csrftoken')
-    } finally {
-      csrfReady = null
-    }
-  })()
-  return csrfReady
 }
 
 // ── Requests ─────────────────────────────────────────────────────────────────
@@ -149,11 +151,7 @@ function buildUrl(path: string, query?: Query) {
 
 async function send(method: string, url: string, opts: Options) {
   const headers: Record<string, string> = { Accept: 'application/json' }
-  const unsafe = !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method.toUpperCase())
-  if (unsafe) {
-    const csrf = await ensureCsrf()
-    if (csrf) headers['X-CSRFToken'] = csrf
-  }
+  if (opts.auth !== false && accessJwt) headers.Authorization = `Bearer ${accessJwt}`
   let body: BodyInit | undefined
   if (opts.form) body = opts.form
   else if (opts.body !== undefined) {
@@ -161,9 +159,39 @@ async function send(method: string, url: string, opts: Options) {
     body = JSON.stringify(opts.body)
   }
   try {
-    return await fetch(url, { method, headers, body, credentials: 'include' })
+    return await fetch(url, { method, headers, body })
   } catch {
     return null
+  }
+}
+
+let refreshPromise: Promise<boolean | null> | null = null
+
+async function refreshAccessToken(): Promise<boolean | null> {
+  if (!refreshJwt) return false
+  if (refreshPromise) return refreshPromise
+
+  refreshPromise = (async () => {
+    const res = await send('POST', buildUrl('/auth/refresh/'), {
+      body: { refresh: refreshJwt },
+      auth: false,
+    })
+    if (!res) return null
+    if (!res.ok) return false
+    try {
+      const tokens = (await res.json()) as { access?: string; refresh?: string }
+      if (!tokens.access || !tokens.refresh) return false
+      storeTokens(tokens.access, tokens.refresh)
+      return true
+    } catch {
+      return false
+    }
+  })()
+
+  try {
+    return await refreshPromise
+  } finally {
+    refreshPromise = null
   }
 }
 
@@ -189,28 +217,53 @@ async function parseError(res: Response): Promise<ApiError> {
     // Non-JSON error page
   }
 
-  const first = (value: unknown): string | null => (Array.isArray(value) ? first(value[0]) : typeof value === 'string' ? value : null)
+  const allStrings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.flatMap(allStrings) : typeof value === 'string' ? [value] : []
   const fieldErrors = (errors: unknown) => {
-    if (!errors || typeof errors !== 'object') return null
-    for (const [field, value] of Object.entries(errors as Record<string, unknown>)) {
-      const msg = first(value)
-      if (msg) return field === 'non_field_errors' || field === 'detail' ? msg : `${field.replace(/_/g, ' ')}: ${msg}`
+    if (Array.isArray(errors)) {
+      const messages = allStrings(errors)
+      return messages.length ? [...new Set(messages)].join('; ') : null
     }
-    return null
+    if (!errors || typeof errors !== 'object') return null
+    const messages = Object.entries(errors as Record<string, unknown>)
+      .filter(([field]) => !['code', 'detail', 'errors'].includes(field))
+      .flatMap(([field, value]) =>
+        allStrings(value).map((message) =>
+          field === 'non_field_errors' ? message : `${field.replace(/_/g, ' ')}: ${message}`,
+        ),
+      )
+    return messages.length ? [...new Set(messages)].join('; ') : null
   }
 
-  const message = first(body?.detail) ?? fieldErrors(body?.errors) ?? fieldErrors(body) ?? `Request failed (${res.status})`
+  const message = fieldErrors(body?.errors) ?? fieldErrors(body) ?? allStrings(body?.detail)[0] ?? `Request failed (${res.status})`
   const code = KNOWN_CODES.has(body?.code as ErrorCode) ? (body!.code as ErrorCode) : (STATUS_CODES[res.status] ?? 'unknown')
   return { message, code }
 }
 
 export async function request<T>(method: string, path: string, opts: Options = {}): Promise<Result<T>> {
   const url = buildUrl(path, opts.query)
-  const res = await send(method, url, opts)
+  let res = await send(method, url, opts)
+
+  if (
+    res?.status === 401 &&
+    opts.auth !== false &&
+    !path.includes('/auth/login/') &&
+    !path.includes('/auth/refresh/')
+  ) {
+    const refreshed = await refreshAccessToken()
+    if (refreshed) {
+      const retryOpts =
+        path.includes('/auth/logout/') && typeof opts.body === 'object' && opts.body
+          ? { ...opts, body: { ...(opts.body as Record<string, unknown>), refresh: refreshJwt } }
+          : opts
+      res = await send(method, url, retryOpts)
+    } else if (refreshed === false) {
+      setSession(false)
+    }
+  }
 
   if (!res) return { data: null, error: { message: 'Could not reach the server, check your connection', code: 'network' } }
   if (!res.ok) {
-    // Cookie session gone: clear the tab flag when /auth/me/ fails
     if ((res.status === 401 || res.status === 403) && path.includes('/auth/me/') && hasSession()) {
       setSession(false)
     }

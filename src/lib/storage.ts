@@ -45,9 +45,15 @@ export async function openAttachment(attachment: Pick<PurchaseAttachment, 'id' |
 }
 
 /** Uploads the file and links it to the request as the signed-in user */
-export async function attachFile(purchaseRequestId: string, file: File, attachmentType: AttachmentType, description?: string) {
+export async function attachFile(
+  purchaseRequestId: string,
+  file: File,
+  attachmentType: AttachmentType,
+  description?: string,
+  projectId?: string,
+) {
   const problem = validateFile(file)
   if (problem) return { error: problem }
-  const { error } = await backend.attachments.upload(purchaseRequestId, file, attachmentType, description)
+  const { error } = await backend.attachments.upload(purchaseRequestId, file, attachmentType, description, projectId)
   return { error: error?.message ?? null }
 }

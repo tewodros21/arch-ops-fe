@@ -1,8 +1,19 @@
-import type { AppNotification, AuditEvent, Department, LaborRequest, Profile, Project, PurchaseRequest, SiteEmployee, Vendor } from '@/types'
-import { ensureCsrf, hasSession, http, list, onSessionChange, request, setSession, type Page } from './http'
+import type {
+  AppNotification,
+  AuditEvent,
+  Department,
+  LaborRequest,
+  Profile,
+  Project,
+  PurchaseDuplicate,
+  PurchaseRequest,
+  SiteEmployee,
+  Vendor,
+} from '@/types'
+import { getRefreshToken, hasSession, http, list, onSessionChange, request, setSession, setTokens, type Page } from './http'
 import type { Backend, ItemReceiptInput, ReceiptInput, Result, SiteEmployeeInput, SiteEmployeePatch, VendorHistory, VendorInput } from './types'
 
-// Data source for the Django REST API. Cookie session auth; the server enforces roles,
+// Data source for the Django REST API. JWT auth; the server enforces roles,
 // the approval workflow, audit and notifications.
 
 const NOTIFICATION_POLL_MS = 15_000
@@ -31,19 +42,25 @@ export const djangoBackend: Backend = {
     onChange: onSessionChange,
 
     async signIn(email, password) {
-      await ensureCsrf()
-      const { data, error } = await request<{ user: Profile }>('POST', '/auth/login/', {
+      const { data, error } = await request<{ access: string; refresh: string; user: Profile }>('POST', '/auth/login/', {
         body: { email, password },
         auth: false,
       })
-      if (error || !data?.user) return { data: null, error }
-      setSession(true)
+      if (error) return { data: null, error }
+      if (!data?.access || !data.refresh || !data.user) {
+        return {
+          data: null,
+          error: { message: 'The server returned an incomplete sign-in response', code: 'unknown' },
+        }
+      }
+      setTokens({ access: data.access, refresh: data.refresh })
       return { data: null, error: null }
     },
 
     async signOut() {
       try {
-        await http.post('/auth/logout/')
+        const refresh = getRefreshToken()
+        if (refresh) await http.post('/auth/logout/', { refresh })
       } finally {
         setSession(false)
       }
@@ -103,6 +120,14 @@ export const djangoBackend: Backend = {
       return error || !data ? { data: null, error } : { data: data.count, error: null }
     },
 
+    async checkDuplicates(items, excludeRequestId) {
+      const { data, error } = await http.post<PurchaseDuplicate[]>('/purchase-requests/duplicate-check/', {
+        items,
+        ...(excludeRequestId ? { exclude_request_id: excludeRequestId } : {}),
+      })
+      return error || !data ? { data: null, error } : { data, error: null }
+    },
+
     async create(input) {
       const { data, error } = await http.post<PurchaseRequest>('/purchase-requests/', input)
       return error || !data ? { data: null, error } : { data: { id: data.id }, error: null }
@@ -128,11 +153,12 @@ export const djangoBackend: Backend = {
   },
 
   attachments: {
-    upload(requestId, file, type, description) {
+    upload(requestId, file, type, description, projectId) {
       const form = new FormData()
       form.append('file', file)
       form.append('attachment_type', type)
       if (description) form.append('description', description)
+      if (projectId) form.append('project_id', projectId)
       return done(http.upload(`/purchase-requests/${requestId}/attachments/`, form))
     },
 

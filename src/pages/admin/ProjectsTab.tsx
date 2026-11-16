@@ -6,6 +6,7 @@ import { ProjectFormModal } from '@/components/admin/ProjectFormModal'
 import { PROJECT_CREATED_EVENT } from '@/constants'
 import { notify } from '@/lib/notify'
 import { deleteProject, fetchAllProjects } from '@/services'
+import { useAuth } from '@/context/AuthContext'
 import type { Project } from '@/types'
 import { formatCurrency } from '@/utils'
 import { ActivePill, EmptyCard, ListCard } from './shared'
@@ -14,6 +15,8 @@ const TEMPLATE = 'md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.8fr)_6rem_5rem]'
 const money = (n: number) => formatCurrency(Math.round(n))
 
 export function ProjectsTab() {
+  const { profile } = useAuth()
+  const canManageProjects = profile?.role === 'admin'
   const confirm = useConfirm()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
@@ -129,22 +132,24 @@ export function ProjectsTab() {
                   <ActivePill active={p.is_active ?? false} />
                 </div>
 
-                <div className="flex justify-end gap-1.5">
-                  <button
-                    onClick={() => setEditing(p)}
-                    aria-label={`Edit ${p.name}`}
-                    className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-black/10 text-[var(--ink)] hover:bg-white"
-                  >
-                    <Pencil size={15} />
-                  </button>
-                  <button
-                    onClick={() => remove(p)}
-                    aria-label={`Delete ${p.name}`}
-                    className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-black/10 text-[var(--ink-soft)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                </div>
+                {canManageProjects && (
+                  <div className="flex justify-end gap-1.5">
+                    <button
+                      onClick={() => setEditing(p)}
+                      aria-label={`Edit ${p.name}`}
+                      className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-black/10 text-[var(--ink)] hover:bg-white"
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      onClick={() => remove(p)}
+                      aria-label={`Delete ${p.name}`}
+                      className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-black/10 text-[var(--ink-soft)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                )}
               </li>
             )
           })}

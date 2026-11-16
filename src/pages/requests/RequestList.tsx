@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { differenceInCalendarDays, format } from 'date-fns'
-import { ChevronRight, Inbox, Search, X } from 'lucide-react'
+import { ChevronRight, Inbox, Plus, Search, X } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
-import { EDITABLE_STATUSES } from '@/lib/workflow'
+import { canCreatePurchaseRequest, EDITABLE_STATUSES } from '@/lib/workflow'
 import { useT } from '@/lib/i18n'
 import { fetchPurchaseRequests, PURCHASE_SAVED_EVENT } from '@/services/requests'
 import { Avatar, PageHeader, StatusBadge } from '@/components/ui'
@@ -57,15 +57,16 @@ export function RequestList() {
     return () => window.removeEventListener(PURCHASE_SAVED_EVENT, load)
   }, [])
 
+  const isShopkeeper = profile?.role === 'shopkeeper'
+  const canCreateRequest = canCreatePurchaseRequest(profile?.role)
+
   // Drafts stay private to their requester (and admins)
   const scoped = requests.filter((r) => {
-    if (isShopkeeper) return ['purchased', 'completed'].includes(r.status)
+    if (isShopkeeper) return ['purchased', 'partially_received', 'completed'].includes(r.status)
     const mine = r.requester_id === profile?.id
-    if (profile?.role === 'shopkeeper') return ['purchased', 'partially_received', 'completed'].includes(r.status)
     if (EDITABLE_STATUSES.includes(r.status)) return mine || profile?.role === 'admin'
     return true
   })
-  const isShopkeeper = profile?.role === 'shopkeeper'
   const visibleFilters = isShopkeeper ? FILTERS.filter((f) => ['all', 'done'].includes(f.key)) : FILTERS
   const filter = visibleFilters.find((f) => f.key === filterKey) ?? visibleFilters[0]
   const q = search.toLowerCase()
@@ -82,6 +83,16 @@ export function RequestList() {
       <PageHeader
         title={t('Purchase requests')}
         count={filtered.length}
+        actions={canCreateRequest && (
+          <button
+            type="button"
+            onClick={() => setParam('new', 'request')}
+            className="focus-ring inline-flex h-11 items-center justify-center gap-2 rounded-full bg-[var(--panel-dark)] px-5 text-sm font-semibold text-white transition-transform active:scale-[0.98]"
+          >
+            <Plus size={17} />
+            Add purchase request
+          </button>
+        )}
         subtitle={
           isShopkeeper
             ? t('{n} delivery requests to track', { n: filtered.length })
