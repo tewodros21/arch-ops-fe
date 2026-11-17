@@ -17,6 +17,7 @@ export const NAV: NavEntry[] = [
   { to: '/labor', label: 'Labor Requests', short: 'Labor', icon: Users, roles: null },
   { to: '/audit', label: 'Audit Log', short: 'Audit', icon: History, roles: ['admin'] },
   { to: '/admin', label: 'Admin', short: 'Admin', icon: Settings2, roles: ['admin'] },
+  { to: '/admin/projects', label: 'Projects', short: 'Projects', icon: FolderKanban, roles: ['ceo'] },
 ]
 
 export function navFor(role: Role) {
@@ -28,7 +29,7 @@ export function createActionFor(pathname: string, role: Role) {
   if (pathname.startsWith('/labor')) {
     return { search: NEW_LABOR_SEARCH, label: 'Request labor', aria: 'New labor request', icon: HardHat }
   }
-  if (pathname === '/admin/projects' && role === 'admin') {
+  if (pathname === '/admin/projects' && (role === 'admin' || role === 'ceo')) {
     return { search: NEW_PROJECT_SEARCH, label: 'Add project', aria: 'Add project', icon: FolderKanban }
   }
   if (pathname === '/admin/users' && role === 'admin') {

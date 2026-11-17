@@ -11,7 +11,7 @@ type Tab = 'users' | 'projects' | 'departments'
 
 const TABS: { id: Tab; label: string; icon: typeof Users; roles: Role[]; subtitle: string }[] = [
   { id: 'users', label: 'Users', icon: Users, roles: ['admin'], subtitle: 'Roles and departments decide who approves what' },
-  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin'], subtitle: 'Sites requests are raised against, with spend against budget' },
+  { id: 'projects', label: 'Projects', icon: FolderKanban, roles: ['admin', 'ceo'], subtitle: 'Sites requests are raised against, with spend against budget' },
   { id: 'departments', label: 'Departments', icon: Building2, roles: ['admin'], subtitle: 'Teams people and requests belong to' },
 ]
 
@@ -42,16 +42,16 @@ export function Admin() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Admin" subtitle={current.subtitle} />
+      <PageHeader title={allowed.length === 1 ? current.label : 'Admin'} subtitle={current.subtitle} />
 
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+      {allowed.length > 1 && <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
         {allowed.map((t) => (
           <button key={t.id} className="chip focus-ring" aria-pressed={t.id === current.id} onClick={() => navigate(`/admin/${t.id}`)}>
             <t.icon size={15} />
             {t.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       {current.id === 'users' && <UsersTab />}
       {current.id === 'projects' && <ProjectsTab />}

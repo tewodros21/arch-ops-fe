@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FolderKanban } from 'lucide-react'
 import { notify } from '@/lib/notify'
-import { saveProject } from '@/services'
-import type { Project } from '@/types'
+import { fetchTeamMembers, saveProject } from '@/services'
+import type { Profile, Project } from '@/types'
 import { Field, FormModal, Toggle } from './FormModal'
 
 export function ProjectFormModal({ project, onClose, onSaved }: { project: Project | null; onClose: () => void; onSaved: (project: Project) => void }) {
@@ -12,6 +12,12 @@ export function ProjectFormModal({ project, onClose, onSaved }: { project: Proje
   const [location, setLocation] = useState(project?.location ?? '')
   const [budget, setBudget] = useState(project?.budget != null ? String(project.budget) : '')
   const [active, setActive] = useState(project?.is_active ?? true)
+  const [managerId, setManagerId] = useState(project?.project_manager_ids?.[0] ?? '')
+  const [managers, setManagers] = useState<Profile[]>([])
+
+  useEffect(() => {
+    fetchTeamMembers().then((team) => setManagers(team.filter((u) => u.role === 'project_manager' && u.is_active)))
+  }, [])
   const [touched, setTouched] = useState(false)
 
   const budgetNum = budget.trim() ? Number(budget) : null
@@ -31,6 +37,7 @@ export function ProjectFormModal({ project, onClose, onSaved }: { project: Proje
       location: location.trim() || null,
       budget: budgetNum,
       is_active: active,
+      project_manager_id: managerId || null,
     }
     const { data, error } = await saveProject(row, project?.id)
     if (error || !data) {
@@ -79,6 +86,19 @@ export function ProjectFormModal({ project, onClose, onSaved }: { project: Proje
           placeholder="250000"
           className={errors.budget ? 'field !border-[var(--accent)]' : 'field'}
         />
+      </Field>
+      <Field label="Project Manager" htmlFor="pr-manager" hint="Approves this project's purchase requests">
+        <select id="pr-manager" value={managerId} onChange={(e) => setManagerId(e.target.value)} className="field">
+          <option value="">Assign later</option>
+          {managers.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.full_name}
+              {m.assigned_project_ids?.length && !project?.project_manager_ids?.includes(m.id)
+                ? ` · ${m.assigned_project_ids.length} project${m.assigned_project_ids.length === 1 ? '' : 's'}`
+                : ''}
+            </option>
+          ))}
+        </select>
       </Field>
       <Toggle checked={active} onChange={setActive} label="Active project" description="Archived projects are hidden from new requests" />
     </FormModal>

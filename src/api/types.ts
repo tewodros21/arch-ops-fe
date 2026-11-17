@@ -74,7 +74,10 @@ export interface QuotationInput {
 }
 
 export type VendorInput = Pick<Vendor, 'name' | 'contact_person' | 'phone' | 'email' | 'services' | 'address'> & { is_active: boolean }
-export type ProjectInput = Pick<Project, 'name' | 'code' | 'client_name' | 'location' | 'budget' | 'is_active'>
+export type ProjectInput = Pick<Project, 'name' | 'code' | 'client_name' | 'location' | 'budget' | 'is_active'> & {
+  /** Assigns (or with null clears) the project's PM */
+  project_manager_id?: string | null
+}
 export type DepartmentInput = Pick<Department, 'name' | 'is_active'>
 
 export interface ProfilePatch {

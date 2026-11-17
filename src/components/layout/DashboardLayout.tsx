@@ -66,7 +66,7 @@ export function DashboardLayout() {
       {creating === 'request' && !editing && <NewRequestModal onClose={closeCreate} />}
       {editing && <NewRequestModal key={editing} editId={editing} onClose={closeCreate} />}
       {creating === 'labor' && <LaborRequestModal onClose={closeCreate} />}
-      {creating === 'project' && profile && profile.role === 'admin' && (
+      {creating === 'project' && profile && (profile.role === 'admin' || profile.role === 'ceo') && (
         <ProjectFormModal
           project={null}
           onClose={closeCreate}
