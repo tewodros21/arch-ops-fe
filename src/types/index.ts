@@ -116,6 +116,13 @@ export interface Approval {
 
 export type SupplierPaymentMethod = 'bank' | 'telebirr'
 
+export interface SupplierPaymentAccount {
+  bank_name: string
+  account_number: string
+  account_holder_name: string
+  phone_number: string
+}
+
 export type AttachmentType = 'proforma' | 'invoice' | 'receipt' | 'delivery' | 'photo' | 'other'
 
 export interface PurchaseAttachment {
@@ -176,6 +183,9 @@ export interface PurchaseRequest {
   supplier_payment_method?: SupplierPaymentMethod | ''
   supplier_bank_name?: string
   supplier_account_number?: string
+  supplier_account_holder_name?: string
+  supplier_phone_number?: string
+  supplier_payment_accounts?: SupplierPaymentAccount[]
   project_suppliers?: PurchaseProjectSupplier[]
   requester_id?: string
   requester?: Profile
