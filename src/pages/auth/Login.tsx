@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { notify } from '@/lib/notify'
 import { ArrowRight, Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
@@ -87,7 +87,12 @@ export function Login() {
                 />
               </div>
               <div>
-                <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-[var(--ink)]">Password</label>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <label htmlFor="password" className="block text-sm font-medium text-[var(--ink)]">Password</label>
+                  <Link to="/forgot-password" className="focus-ring rounded text-sm text-[var(--ink-soft)] underline-offset-4 hover:text-[var(--ink)] hover:underline">
+                    Forgot password?
+                  </Link>
+                </div>
                 <div className="relative">
                   <input
                     id="password"

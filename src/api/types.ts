@@ -162,6 +162,10 @@ export interface Backend {
     updateMe(patch: Pick<ProfilePatch, 'full_name' | 'avatar_initials'>): Promise<Result<Profile>>
     /** The server verifies the current password first */
     changePassword(newPassword: string, currentPassword: string): Promise<Result>
+    /** Emails a reset link; the reply is the same whether or not the account exists */
+    requestPasswordReset(email: string): Promise<Result>
+    /** Sets a new password from the emailed link (uid + token) */
+    confirmPasswordReset(uid: string, token: string, newPassword: string): Promise<Result>
   }
 
   profiles: {

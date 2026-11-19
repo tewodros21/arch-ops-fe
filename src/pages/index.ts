@@ -1,5 +1,7 @@
 export { AuditLog } from './audit/AuditLog'
 export { Login } from './auth/Login'
+export { ForgotPassword } from './auth/ForgotPassword'
+export { ResetPassword } from './auth/ResetPassword'
 export { Dashboard } from './dashboard/Dashboard'
 export { LaborList } from './labor/LaborList'
 export { Home } from './landing/Home'

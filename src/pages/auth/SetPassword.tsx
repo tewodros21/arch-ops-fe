@@ -1,12 +1,11 @@
 import { useState, type FormEvent } from 'react'
-import { Eye, EyeOff, KeyRound, LogOut } from 'lucide-react'
+import { KeyRound, LogOut } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { changePassword } from '@/services/account'
 import { notify } from '@/lib/notify'
 import { Button } from '@/components/ui'
+import { PasswordInput } from '@/components/ui/PasswordInput'
 
-const inputClass =
-  'focus-ring h-12 w-full rounded-2xl border border-black/10 bg-[var(--canvas)] px-4 text-sm text-[var(--ink)] placeholder:text-slate-400 focus:border-[var(--ink)]'
 
 /** Shown instead of the app when an admin-created account signs in with its temporary password */
 export function SetPassword() {
@@ -82,30 +81,5 @@ export function SetPassword() {
         </button>
       </form>
     </main>
-  )
-}
-
-function PasswordInput({ label, value, onChange, autoComplete }: { label: string; value: string; onChange: (value: string) => void; autoComplete: string }) {
-  const [visible, setVisible] = useState(false)
-  return (
-    <div className="relative">
-      <input
-        type={visible ? 'text' : 'password'}
-        aria-label={label}
-        autoComplete={autoComplete}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        required
-        className={`${inputClass} pr-12`}
-      />
-      <button
-        type="button"
-        onClick={() => setVisible((v) => !v)}
-        aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`}
-        className="focus-ring absolute top-1/2 right-2 -translate-y-1/2 rounded-full p-2 text-slate-500 hover:text-[var(--ink)]"
-      >
-        {visible ? <EyeOff size={18} /> : <Eye size={18} />}
-      </button>
-    </div>
   )
 }

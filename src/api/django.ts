@@ -46,6 +46,12 @@ export const djangoBackend: Backend = {
 
     changePassword: (newPassword, currentPassword) =>
       done(http.post('/auth/change-password/', { current_password: currentPassword, new_password: newPassword })),
+
+    requestPasswordReset: (email) =>
+      done(request('POST', '/auth/password-reset/', { body: { email }, auth: false })),
+
+    confirmPasswordReset: (uid, token, newPassword) =>
+      done(request('POST', '/auth/password-reset/confirm/', { body: { uid, token, new_password: newPassword }, auth: false })),
   },
 
   profiles: {
