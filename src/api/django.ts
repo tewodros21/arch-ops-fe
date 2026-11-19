@@ -58,6 +58,7 @@ export const djangoBackend: Backend = {
     list: (opts = {}) => list<Profile>('/users/', { ordering: 'full_name' }, opts.limit),
     create: (input) => http.post<Profile>('/users/', input),
     update: (id, patch) => http.patch<Profile>(`/users/${id}/`, patch),
+    remove: (id) => http.delete(`/users/${id}/`),
   },
 
   departments: {

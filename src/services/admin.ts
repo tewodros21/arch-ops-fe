@@ -16,6 +16,10 @@ export function updateProfile(id: string, patch: ProfilePatch) {
   return backend.profiles.update(id, patch)
 }
 
+export function deleteUser(id: string) {
+  return backend.profiles.remove(id)
+}
+
 export async function fetchTeamMembers(limit?: number): Promise<Profile[]> {
   const { data } = await fetchTeam(limit)
   return data ?? []

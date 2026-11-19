@@ -174,6 +174,8 @@ export interface Backend {
     create(input: NewUserInput): Promise<Result<Profile>>
     /** Admin edit of anyone's name, role or department */
     update(id: string, patch: ProfilePatch): Promise<Result<Profile>>
+    /** Admin only: permanent delete, refused with in_use when the user has any history */
+    remove(id: string): Promise<Result>
   }
 
   departments: {
