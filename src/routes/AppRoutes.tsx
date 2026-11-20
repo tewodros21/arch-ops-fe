@@ -10,12 +10,12 @@ import {
   RequestList,
   RequestDetail,
   LaborList,
-  Vendors,
   AuditLog,
   LaborDetail,
-  VendorDetail,
   Admin,
   Account,
+  Vendors,
+  VendorDetail,
 } from '@/pages'
 
 export function AppRoutes() {
@@ -45,6 +45,14 @@ export function AppRoutes() {
         <Route path="/account" element={<Account />} />
         <Route path="/audit" element={<AuditLog />} />
       </Route>
+      <Route
+        path="/change-password"
+        element={
+          <ProtectedRoute>
+            <Account forcePasswordChange />
+          </ProtectedRoute>
+        }
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )

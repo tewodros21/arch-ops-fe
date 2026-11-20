@@ -1,9 +1,20 @@
-import type { AppNotification, AuditEvent, Department, LaborRequest, Profile, Project, PurchaseRequest, Vendor } from '@/types'
-import { hasSession, http, list, onSessionChange, refreshToken, request, setTokens, type Page } from './http'
-import type { Backend, ReceiptInput, Result, VendorHistory } from './types'
+import type {
+  AppNotification,
+  AuditEvent,
+  Department,
+  LaborRequest,
+  Profile,
+  Project,
+  PurchaseDuplicate,
+  PurchaseRequest,
+  SiteEmployee,
+  Vendor,
+} from '@/types'
+import { getRefreshToken, hasSession, http, list, onSessionChange, request, setSession, setTokens, type Page } from './http'
+import type { Backend, ItemReceiptInput, ReceiptInput, Result, SiteEmployeeInput, SiteEmployeePatch, VendorHistory, VendorInput } from './types'
 
-// Data source for the Django REST API. Every path, body and response here is specified in
-// public/docs/openapi.yaml; the server enforces roles, the approval workflow, audit and notifications.
+// Data source for the Django REST API. JWT auth; the server enforces roles,
+// the approval workflow, audit and notifications.
 
 const NOTIFICATION_POLL_MS = 15_000
 
@@ -18,9 +29,14 @@ const save = <T>(path: string, input: unknown, id?: string) => (id ? http.patch<
 export const djangoBackend: Backend = {
   auth: {
     async me() {
-      if (!hasSession()) return null
-      const { data } = await http.get<Profile>('/auth/me/')
-      return data
+      // Always probe the cookie session (flag alone is not enough after refresh)
+      const { data, error } = await http.get<Profile>('/auth/me/')
+      if (data) {
+        setSession(true, { quiet: true })
+        return data
+      }
+      if (error && hasSession()) setSession(false)
+      return null
     },
 
     onChange: onSessionChange,
@@ -30,16 +46,24 @@ export const djangoBackend: Backend = {
         body: { email, password },
         auth: false,
       })
-      if (error || !data) return { data: null, error }
+      if (error) return { data: null, error }
+      if (!data?.access || !data.refresh || !data.user) {
+        return {
+          data: null,
+          error: { message: 'The server returned an incomplete sign-in response', code: 'unknown' },
+        }
+      }
       setTokens({ access: data.access, refresh: data.refresh })
       return { data: null, error: null }
     },
 
     async signOut() {
-      const refresh = refreshToken()
-      // Blacklists the refresh token; the local session is cleared even if the call fails
-      if (refresh) await http.post('/auth/logout/', { refresh })
-      setTokens(null)
+      try {
+        const refresh = getRefreshToken()
+        if (refresh) await http.post('/auth/logout/', { refresh })
+      } finally {
+        setSession(false)
+      }
     },
 
     updateMe: (patch) => http.patch<Profile>('/auth/me/', patch),
@@ -68,6 +92,18 @@ export const djangoBackend: Backend = {
     remove: (id) => http.delete(`/departments/${id}/`),
   },
 
+  siteEmployees: {
+    list: (opts = {}) =>
+      list<SiteEmployee>('/site-employees/', {
+        department: opts.department,
+        is_active: opts.activeOnly === undefined ? undefined : opts.activeOnly,
+        search: opts.search,
+      }),
+    create: (input: SiteEmployeeInput) => http.post<SiteEmployee>('/site-employees/', input),
+    update: (id: string, patch: SiteEmployeePatch) => http.patch<SiteEmployee>(`/site-employees/${id}/`, patch),
+    remove: (id: string) => http.delete(`/site-employees/${id}/`),
+  },
+
   projects: {
     // spent_amount is always part of the payload
     list: (opts = {}) => list<Project>('/projects/', { ordering: 'name', is_active: opts.activeOnly ? true : undefined }),
@@ -78,7 +114,7 @@ export const djangoBackend: Backend = {
   vendors: {
     list: (opts = {}) => list<Vendor>('/vendors/', { ordering: 'name', is_active: opts.activeOnly ? true : undefined }),
     get: (id) => http.get<Vendor>(`/vendors/${id}/`),
-    save: (input, id) => save<Vendor>('/vendors/', input, id),
+    save: (input: VendorInput, id) => save<Vendor>('/vendors/', input, id),
     history: (id) => http.get<VendorHistory>(`/vendors/${id}/history/`),
   },
 
@@ -91,6 +127,14 @@ export const djangoBackend: Backend = {
       return error || !data ? { data: null, error } : { data: data.count, error: null }
     },
 
+    async checkDuplicates(items, excludeRequestId) {
+      const { data, error } = await http.post<PurchaseDuplicate[]>('/purchase-requests/duplicate-check/', {
+        items,
+        ...(excludeRequestId ? { exclude_request_id: excludeRequestId } : {}),
+      })
+      return error || !data ? { data: null, error } : { data, error: null }
+    },
+
     async create(input) {
       const { data, error } = await http.post<PurchaseRequest>('/purchase-requests/', input)
       return error || !data ? { data: null, error } : { data: { id: data.id }, error: null }
@@ -101,9 +145,7 @@ export const djangoBackend: Backend = {
     replaceItems: (id, items) => done(http.put(`/purchase-requests/${id}/items/`, items)),
     addQuotation: (requestId, quote) => done(http.post(`/purchase-requests/${requestId}/quotations/`, quote)),
     removeQuotation: (quoteId) => http.delete(`/quotations/${quoteId}/`),
-    // The server clears the other quotes on the request
     selectQuotation: (_requestId, quoteId) => done(http.post(`/quotations/${quoteId}/select/`)),
-
     submit: (id) => done(http.post(`/purchase-requests/${id}/submit/`)),
     decide: (id, decision, comment, approvedAmount) =>
       done(http.post(`/purchase-requests/${id}/decide/`, {
@@ -112,16 +154,18 @@ export const djangoBackend: Backend = {
         ...(approvedAmount != null ? { approved_amount: approvedAmount } : {}),
       })),
     recordPurchase: (id, actualAmount) => done(http.post(`/purchase-requests/${id}/record-purchase/`, { actual_amount: actualAmount })),
+    updateReceivedItems: (id, items: ItemReceiptInput[]) => done(http.post(`/purchase-requests/${id}/receive/`, { items })),
     receive: (id, input: ReceiptInput) => done(http.post(`/purchase-requests/${id}/receive/`, input)),
     complete: (id) => done(http.post(`/purchase-requests/${id}/complete/`)),
   },
 
   attachments: {
-    upload(requestId, file, type, description) {
+    upload(requestId, file, type, description, projectId) {
       const form = new FormData()
       form.append('file', file)
       form.append('attachment_type', type)
       if (description) form.append('description', description)
+      if (projectId) form.append('project_id', projectId)
       return done(http.upload(`/purchase-requests/${requestId}/attachments/`, form))
     },
 

@@ -46,6 +46,7 @@ export function RequestDetail() {
   const [receiptQuantities, setReceiptQuantities] = useState<Record<string, string>>({})
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [uploadType, setUploadType] = useState<AttachmentType>('other')
+  const [uploadProjectId, setUploadProjectId] = useState('')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadBusy, setUploadBusy] = useState(false)
   const [paymentReceipt, setPaymentReceipt] = useState<File | null>(null)
@@ -68,6 +69,7 @@ export function RequestDetail() {
 
   useEffect(() => {
     setApprovedAmount(null)
+    setUploadProjectId('')
     load()
     // The edit modal lives in the layout; reload when it saves this request
     function onSaved(e: Event) {
@@ -106,6 +108,19 @@ export function RequestDetail() {
   const req = request
   const role = profile?.role
   const isShopkeeper = role === 'shopkeeper'
+  if (isShopkeeper && !['purchased', 'partially_received', 'completed'].includes(req.status)) {
+    return (
+      <div className="rounded-[1.75rem] bg-white px-6 py-16 text-center">
+        <p className="text-2xl font-black text-[var(--ink)]">{t('Request not available')}</p>
+        <p className="mx-auto mt-3 max-w-md text-sm text-slate-500">
+          {t('Shopkeepers can view requests once Finance has purchased the items.')}
+        </p>
+        <Link to="/requests" className="mt-5 inline-block text-sm font-medium text-[var(--accent)] underline underline-offset-4">
+          {t('Back to requests')}
+        </Link>
+      </div>
+    )
+  }
   const isRequester = !!profile && profile.id === req.requester_id
   const myStage = role ? ROLE_STAGE[role] : null
   const currentStage = stageForStatus(req.status)
@@ -124,13 +139,31 @@ export function RequestDetail() {
   // Present only when the API lets this user see where the supplier gets paid (Finance, Admin, requester)
   const seesPayment = req.supplier_account_number !== undefined
   const paymentMethod = req.supplier_payment_method || null
-  // The Proforma document is optional; the amount comes from the items
-  const hasProforma = !!(req.vendor_name?.trim() && req.vendor_location?.trim() && Number(req.proforma_amount) > 0)
   const requestDate = req.submitted_at ?? req.created_at
 
   const items = req.items ?? []
   const requestProjects = req.projects?.length ? req.projects : req.project ? [req.project] : []
   const multiProject = requestProjects.length > 1
+  const projectSuppliers = req.project_suppliers ?? []
+  const hasPricedItems = items.length > 0 && items.every((item) => Number(item.estimated_unit_price) > 0)
+  const hasSupplierDetails = projectSuppliers.length
+    ? requestProjects.every((project) => {
+        const supplier = projectSuppliers.find((row) => row.project_id === project.id)
+        return !!(
+          supplier?.supplier_name.trim()
+          && supplier.supplier_address.trim()
+          && supplier.supplier_phone.trim()
+          && supplier.payment_method
+          && supplier.account_number?.trim()
+        )
+      })
+    : !!(req.vendor_name?.trim() && req.vendor_location?.trim())
+  const hasProforma = hasPricedItems && hasSupplierDetails && requestProjects.every((project) =>
+    (req.attachments ?? []).some((attachment) =>
+      attachment.attachment_type === 'proforma'
+      && (attachment.project_id === project.id || (!projectSuppliers.length && requestProjects.length === 1 && !attachment.project_id)),
+    ),
+  )
   const itemGroups = multiProject
     ? requestProjects.map((project) => ({
         project,
@@ -355,7 +388,8 @@ export function RequestDetail() {
       return
     }
     setUploadBusy(true)
-    const { error } = await attachFile(req.id, uploadFile, uploadType)
+    const projectId = uploadType === 'proforma' ? uploadProjectId || req.project_id : undefined
+    const { error } = await attachFile(req.id, uploadFile, uploadType, undefined, projectId)
     setUploadBusy(false)
     if (error) notify.error(`Could not upload the document: ${error}`)
     else {
@@ -593,27 +627,136 @@ export function RequestDetail() {
 
           <section className="rounded-[1.75rem] bg-white p-6 sm:p-8">
             <SectionTitle title={isShopkeeper ? t('Supplier') : 'Supplier & Proforma'} />
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Meta label={t('Supplier')}>{req.vendor_name || t('Not provided')}</Meta>
-              <Meta label={t('Supplier location')}>{req.vendor_location || t('Not provided')}</Meta>
-              {!isShopkeeper && req.proforma_amount != null && (
-                <Meta label="Proforma amount">{formatCurrency(req.proforma_amount)}</Meta>
-              )}
-            </div>
-            {seesPayment && !isShopkeeper && (
-              <div className="mt-4 grid grid-cols-1 gap-4 rounded-2xl bg-[var(--canvas)] p-4 sm:grid-cols-3">
-                <Meta label="Pay by">{paymentMethod ? PAYMENT_METHOD_LABELS[paymentMethod] : 'Not provided'}</Meta>
-                {paymentMethod === 'bank' && <Meta label="Bank">{req.supplier_bank_name || 'Not provided'}</Meta>}
-                <Meta label={paymentMethod === 'telebirr' ? 'Telebirr number' : 'Account number'}>
-                  {req.supplier_account_number ? (
-                    <span className="font-mono tracking-wide select-all">{req.supplier_account_number}</span>
-                  ) : (
-                    'Not provided'
-                  )}
-                </Meta>
+            {projectSuppliers.length ? (
+              <div className="space-y-3">
+                {projectSuppliers.map((supplier) => {
+                  const project = requestProjects.find((row) => row.id === supplier.project_id)
+                  const supplierItems = items.filter((item) => (item.project_id ?? req.project_id) === supplier.project_id)
+                  const supplierTotal = supplierItems.reduce(
+                    (sum, item) => sum + Number(item.quantity) * Number(item.estimated_unit_price ?? 0),
+                    0,
+                  )
+                  const supplierProformas = (req.attachments ?? []).filter(
+                    (attachment) =>
+                      attachment.attachment_type === 'proforma' && attachment.project_id === supplier.project_id,
+                  )
+                  return (
+                    <div key={supplier.project_id} className="rounded-2xl bg-[var(--canvas)] p-4">
+                      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-semibold text-[var(--ink)]">{project?.name ?? supplier.project?.name ?? 'Project'}</p>
+                        {!isShopkeeper && <p className="text-sm font-bold text-[var(--ink)]">{formatCurrency(supplierTotal)}</p>}
+                      </div>
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                        <Meta label={t('Supplier')}>{supplier.supplier_name || t('Not provided')}</Meta>
+                        <Meta label="Supplier address">{supplier.supplier_address || t('Not provided')}</Meta>
+                        <Meta label="Supplier contact phone">{supplier.supplier_phone || t('Not provided')}</Meta>
+                      </div>
+                      {!isShopkeeper && supplierProformas.length > 0 && (
+                        <div className="mt-4 flex flex-wrap gap-2 border-t border-black/[0.06] pt-4">
+                          {supplierProformas.map((attachment) => (
+                            <button
+                              key={attachment.id}
+                              type="button"
+                              onClick={() => handleOpenDocument(attachment)}
+                              className="focus-ring flex items-center gap-3 rounded-xl bg-white px-4 py-3 text-left"
+                            >
+                              <FileText size={17} className="text-[var(--accent)]" />
+                              <span className="truncate text-sm font-medium text-[var(--ink)]">{attachment.file_name}</span>
+                              <span className="shrink-0 text-xs text-slate-500">Open Proforma</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                {seesPayment && !isShopkeeper && (
+                  <div className="space-y-3 rounded-2xl bg-[var(--canvas)] p-4">
+                    <Meta label="Pay by">{paymentMethod ? PAYMENT_METHOD_LABELS[paymentMethod] : 'Not provided'}</Meta>
+                    {(req.supplier_payment_accounts?.length
+                      ? req.supplier_payment_accounts
+                      : [
+                          {
+                            bank_name: req.supplier_bank_name ?? projectSuppliers[0]?.bank_name ?? '',
+                            account_number: req.supplier_account_number ?? projectSuppliers[0]?.account_number ?? '',
+                            account_holder_name: req.supplier_account_holder_name ?? '',
+                            phone_number: req.supplier_phone_number ?? '',
+                          },
+                        ]
+                    )
+                      .filter(
+                        (account) =>
+                          account.bank_name ||
+                          account.account_number ||
+                          account.account_holder_name ||
+                          account.phone_number,
+                      )
+                      .map((account, index) => (
+                        <div key={index} className="grid grid-cols-1 gap-3 border-t border-black/[0.06] pt-3 sm:grid-cols-2 lg:grid-cols-4">
+                          {paymentMethod !== 'telebirr' && <Meta label="Bank name">{account.bank_name || 'Not provided'}</Meta>}
+                          <Meta label={paymentMethod === 'telebirr' ? 'Telebirr number' : 'Account number'}>
+                            {account.account_number ? (
+                              <span className="font-mono tracking-wide select-all">{account.account_number}</span>
+                            ) : (
+                              'Not provided'
+                            )}
+                          </Meta>
+                          <Meta label="Account holder">{account.account_holder_name || 'Not provided'}</Meta>
+                          <Meta label="Phone number">{account.phone_number || 'Not provided'}</Meta>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <Meta label={t('Supplier')}>{req.vendor_name || t('Not provided')}</Meta>
+                  <Meta label={t('Supplier location')}>{req.vendor_location || t('Not provided')}</Meta>
+                  {!isShopkeeper && req.proforma_amount != null && (
+                    <Meta label="Proforma amount">{formatCurrency(req.proforma_amount)}</Meta>
+                  )}
+                </div>
+                {seesPayment && !isShopkeeper && (
+                  <div className="mt-4 space-y-3 rounded-2xl bg-[var(--canvas)] p-4">
+                    <Meta label="Pay by">{paymentMethod ? PAYMENT_METHOD_LABELS[paymentMethod] : 'Not provided'}</Meta>
+                    {(req.supplier_payment_accounts?.length
+                      ? req.supplier_payment_accounts
+                      : [
+                          {
+                            bank_name: req.supplier_bank_name ?? '',
+                            account_number: req.supplier_account_number ?? '',
+                            account_holder_name: req.supplier_account_holder_name ?? '',
+                            phone_number: req.supplier_phone_number ?? '',
+                          },
+                        ]
+                    )
+                      .filter(
+                        (account) =>
+                          account.bank_name ||
+                          account.account_number ||
+                          account.account_holder_name ||
+                          account.phone_number,
+                      )
+                      .map((account, index) => (
+                        <div key={index} className="grid grid-cols-1 gap-3 border-t border-black/[0.06] pt-3 sm:grid-cols-2 lg:grid-cols-4">
+                          {paymentMethod !== 'telebirr' && <Meta label="Bank name">{account.bank_name || 'Not provided'}</Meta>}
+                          <Meta label={paymentMethod === 'telebirr' ? 'Telebirr number' : 'Account number'}>
+                            {account.account_number ? (
+                              <span className="font-mono tracking-wide select-all">{account.account_number}</span>
+                            ) : (
+                              'Not provided'
+                            )}
+                          </Meta>
+                          <Meta label="Account holder">{account.account_holder_name || 'Not provided'}</Meta>
+                          <Meta label="Phone number">{account.phone_number || 'Not provided'}</Meta>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </>
             )}
-            {!isShopkeeper && req.attachments?.some((attachment) => attachment.attachment_type === 'proforma') && (
+            {!isShopkeeper && !projectSuppliers.length && req.attachments?.some((attachment) => attachment.attachment_type === 'proforma') && (
               <div className="mt-4 border-t border-black/[0.06] pt-4">
                 {req.attachments
                   .filter((attachment) => attachment.attachment_type === 'proforma')
@@ -668,6 +811,18 @@ export function RequestDetail() {
                   <option key={value} value={value}>{label}</option>
                 ))}
               </select>
+              {uploadType === 'proforma' && (
+                <select
+                  aria-label="Project for Proforma"
+                  value={uploadProjectId || req.project_id}
+                  onChange={(e) => setUploadProjectId(e.target.value)}
+                  className="field h-11 !py-0 sm:w-52"
+                >
+                  {requestProjects.map((project) => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
+              )}
               <FilePick file={uploadFile} onFile={pickFile(setUploadFile)} />
               <Button variant="outline" onClick={handleUploadDocument} loading={uploadBusy}>
                 <Upload size={16} />
@@ -688,7 +843,7 @@ export function RequestDetail() {
                 <p className="mt-3 text-2xl leading-tight font-black text-white">Ready to submit?</p>
                 <p className="mt-1 text-sm text-white/60">
                   {!hasProforma
-                    ? 'Add the supplier name, location and priced items before submitting for review.'
+                    ? 'Add priced items, complete supplier contact and payment details, and attach a Proforma for each project before submitting.'
                     : role === 'project_manager'
                       ? 'Finance reviews this request after you submit it.'
                       : 'Submit this request to the assigned Project Manager. Project Manager requests go directly to Finance.'}

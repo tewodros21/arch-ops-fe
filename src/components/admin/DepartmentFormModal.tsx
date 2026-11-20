@@ -22,14 +22,15 @@ export function DepartmentFormModal({ department, onClose, onSaved }: { departme
       return false
     }
     notify.success(department ? 'Department saved' : 'Department added')
-    onSaved({ ...data, member_count: data.member_count ?? department?.member_count ?? 0 })
+    // Site employees stay under the old name after a rename, so the new name starts empty.
+    onSaved({ ...data, member_count: data.member_count ?? (renamed ? 0 : (department?.member_count ?? 0)) })
     return true
   }
 
   return (
     <FormModal
       title={department ? 'Edit department' : 'New department'}
-      description="People and purchase requests are grouped by department."
+      description="Site crew and purchase requests are grouped by department."
       icon={Building2}
       submitLabel={department ? 'Save changes' : 'Add department'}
       onSubmit={submit}
@@ -40,10 +41,10 @@ export function DepartmentFormModal({ department, onClose, onSaved }: { departme
       </Field>
       {renamed && (
         <p className="rounded-2xl bg-[var(--sun-soft)] px-4 py-3 text-xs leading-relaxed text-[var(--ink)]">
-          Current members will use the new department name automatically. Existing purchase requests keep the department name recorded when they were created.
+          Site employees and past requests keep the old name. Move employees over from the Site employees tab.
         </p>
       )}
-      <Toggle checked={active} onChange={setActive} label="Active department" description="Archived departments can't be picked for people" />
+      <Toggle checked={active} onChange={setActive} label="Active department" description="Archived departments can't be picked for site employees" />
     </FormModal>
   )
 }

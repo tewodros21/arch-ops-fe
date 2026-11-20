@@ -55,12 +55,14 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
       notify.warning('Assign at least one project to this Project Manager')
       return false
     }
+    const projectIds = role === 'project_manager' ? assignedProjectIds : []
     const { data, error } = await createUser({
       email: email.trim().toLowerCase(),
       full_name: name.trim(),
       role,
       password,
-      assigned_project_ids: role === 'project_manager' ? assignedProjectIds : [],
+      assigned_project_ids: projectIds,
+      ...(role === 'project_manager' ? { project_ids: projectIds, has_all_projects: false } : {}),
     })
     if (error || !data) {
       notify.error(error?.code === 'conflict' ? 'Someone already uses that email' : `Could not add this person: ${error?.message ?? 'unknown error'}`)
@@ -176,11 +178,13 @@ export function ProjectAssignmentField({
               <input
                 type="checkbox"
                 checked={selected.includes(project.id)}
-                onChange={(event) => onChange(
-                  event.target.checked
-                    ? [...selected, project.id]
-                    : selected.filter((id) => id !== project.id),
-                )}
+                onChange={(event) =>
+                  onChange(
+                    event.target.checked
+                      ? [...selected, project.id]
+                      : selected.filter((id) => id !== project.id),
+                  )
+                }
               />
               {project.name} <span className="text-xs text-slate-500">{project.code}</span>
             </label>

@@ -21,6 +21,12 @@ export const ROLE_STAGE: Record<Role, ApprovalStage | null> = {
   admin: null,
 }
 
+const PURCHASE_REQUESTER_ROLES: Role[] = ['admin', 'ceo', 'finance', 'project_manager', 'site_engineer']
+
+export function canCreatePurchaseRequest(role: Role | null | undefined): boolean {
+  return role != null && PURCHASE_REQUESTER_ROLES.includes(role)
+}
+
 export const STAGE_LABELS: Record<ApprovalStage, string> = {
   project_manager: 'Project Manager',
   finance: 'Finance',

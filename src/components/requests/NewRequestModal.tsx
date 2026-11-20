@@ -12,13 +12,14 @@ import { ReviewTile, StepField as Field, StepModal, type Step } from '@/componen
 import {
   announcePurchaseSaved,
   createPurchaseRequest,
+  fetchPurchaseDuplicates,
   fetchProjects,
   fetchPurchaseRequestById,
   replaceItems,
   updatePurchaseRequest,
   type RequestInput,
 } from '@/services/requests'
-import { PAYMENT_METHOD_LABELS, type Project, type SupplierPaymentMethod } from '@/types'
+import { PAYMENT_METHOD_LABELS, type Project, type PurchaseDuplicate, type SupplierPaymentAccount, type SupplierPaymentMethod } from '@/types'
 
 interface ItemRow {
   /** Which selected project the line is for; empty means the first selected project */
@@ -30,7 +31,31 @@ interface ItemRow {
   description: string
 }
 
+interface SupplierFields {
+  supplier_name: string
+  supplier_address: string
+  supplier_phone: string
+  payment_method: SupplierPaymentMethod | ''
+  bank_name: string
+  account_number: string
+}
+
+const EMPTY_SUPPLIER: SupplierFields = {
+  supplier_name: '',
+  supplier_address: '',
+  supplier_phone: '',
+  payment_method: '',
+  bank_name: '',
+  account_number: '',
+}
+
 const EMPTY_ITEM: ItemRow = { project_id: '', name: '', quantity: '1', unit: 'unit', unit_price: '', description: '' }
+const EMPTY_ACCOUNT: SupplierPaymentAccount = {
+  bank_name: '',
+  account_number: '',
+  account_holder_name: '',
+  phone_number: '',
+}
 const UNITS = [
   'unit', 'each', 'pcs', 'pair', 'pack', 'set', 'box', 'bag', 'sack', 'bucket', 'drum',
   'm', 'cm', 'mm', 'm²', 'm³', 'ft', 'roll', 'sheet', 'board', 'length', 'bundle', 'pallet', 'load',
@@ -39,10 +64,10 @@ const UNITS = [
 ]
 
 const STEPS: Step[] = [
-  { title: 'Details', hint: 'What you need and for which projects' },
-  { title: 'Items', hint: 'Items, quantities and unit prices' },
-  { title: 'Total & timing', hint: 'Total from your items, due date and why' },
-  { title: 'Supplier & Proforma', hint: 'One supplier, payment details and optional Proforma' },
+  { title: 'Details', hint: 'Requested by, project location and reason' },
+  { title: 'Materials', hint: 'Material type, quantity and price per piece' },
+  { title: 'Total & timing', hint: 'Total price, due date and reason' },
+  { title: 'Supplier & Proforma', hint: 'Supplier, payment accounts and required Proforma' },
   { title: 'Review', hint: 'Save a draft or submit' },
 ]
 
@@ -68,21 +93,22 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const [loadingEdit, setLoadingEdit] = useState(editing)
   const [loadingProjects, setLoadingProjects] = useState(true)
   const [projectLoadFailed, setProjectLoadFailed] = useState(false)
+  const [duplicateMatches, setDuplicateMatches] = useState<PurchaseDuplicate[]>([])
+  const [duplicateCheckError, setDuplicateCheckError] = useState(false)
   const [touched, setTouched] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
   const [items, setItems] = useState<ItemRow[]>([{ ...EMPTY_ITEM }])
-  const [proformaFile, setProformaFile] = useState<File | null>(null)
-  const [existingProforma, setExistingProforma] = useState<string | null>(null)
+  const [proformaFiles, setProformaFiles] = useState<Record<string, File | null>>({})
+  const [existingProformas, setExistingProformas] = useState<Record<string, string>>({})
   const [form, setForm] = useState({
     title: '',
     description: '',
     /** Selected projects in the order picked; the first is the primary project */
     project_ids: [] as string[],
-    vendor_name: '',
-    vendor_location: '',
+    department: profile?.department ?? 'General',
+    suppliers: {} as Record<string, SupplierFields>,
     supplier_payment_method: '' as SupplierPaymentMethod | '',
-    supplier_bank_name: '',
-    supplier_account_number: '',
+    payment_accounts: [{ ...EMPTY_ACCOUNT }] as SupplierPaymentAccount[],
     justification: '',
     required_date: '',
   })
@@ -113,6 +139,41 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     }
   }, [])
 
+  useEffect(() => {
+    if (step !== 1) return
+    const candidates = items
+      .filter((item) => item.name.trim())
+      .map((item) => ({ project_id: form.project_ids.includes(item.project_id) ? item.project_id : (form.project_ids[0] ?? ''), name: item.name.trim() }))
+      .filter((item) => item.project_id)
+    if (candidates.length === 0) {
+      setDuplicateMatches([])
+      setDuplicateCheckError(false)
+      return
+    }
+
+    setDuplicateMatches([])
+    setDuplicateCheckError(false)
+    let active = true
+    const timeout = window.setTimeout(() => {
+      void fetchPurchaseDuplicates(candidates, editId).then(({ data, error }) => {
+        if (!active) return
+        if (error) {
+          console.error('Could not check for duplicate purchase items:', error)
+          setDuplicateCheckError(true)
+          setDuplicateMatches([])
+          return
+        }
+        setDuplicateCheckError(false)
+        setDuplicateMatches(data)
+      })
+    }, 350)
+
+    return () => {
+      active = false
+      window.clearTimeout(timeout)
+    }
+  }, [step, items, form.project_ids, editId])
+
   // Edit mode: prefill from the saved request
   useEffect(() => {
     if (!editId || !profile) return
@@ -123,15 +184,66 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         return
       }
       const savedItems = r.items ?? []
+      const savedAccounts =
+        r.supplier_payment_accounts?.length
+          ? r.supplier_payment_accounts.map((account) => ({
+              bank_name: account.bank_name ?? '',
+              account_number: account.account_number ?? '',
+              account_holder_name: account.account_holder_name ?? '',
+              phone_number: account.phone_number ?? '',
+            }))
+          : r.supplier_account_number || r.supplier_bank_name || r.supplier_account_holder_name || r.supplier_phone_number
+            ? [
+                {
+                  bank_name: r.supplier_bank_name ?? '',
+                  account_number: r.supplier_account_number ?? '',
+                  account_holder_name: r.supplier_account_holder_name ?? '',
+                  phone_number: r.supplier_phone_number ?? '',
+                },
+              ]
+            : [{ ...EMPTY_ACCOUNT }]
       setForm({
         title: r.title,
         description: r.description ?? '',
         project_ids: r.project_ids?.length ? r.project_ids : [r.project_id],
-        vendor_name: r.vendor_name ?? r.quotations?.[0]?.vendor?.name ?? '',
-        vendor_location: r.vendor_location ?? r.quotations?.[0]?.vendor?.address ?? '',
-        supplier_payment_method: r.supplier_payment_method ?? '',
-        supplier_bank_name: r.supplier_bank_name ?? '',
-        supplier_account_number: r.supplier_account_number ?? '',
+        department: r.department ?? profile.department ?? 'General',
+        suppliers: (r.project_suppliers ?? []).reduce<Record<string, SupplierFields>>((all, supplier) => {
+          all[supplier.project_id] = {
+            supplier_name: supplier.supplier_name ?? '',
+            supplier_address: supplier.supplier_address ?? '',
+            supplier_phone: supplier.supplier_phone ?? '',
+            payment_method: supplier.payment_method ?? '',
+            bank_name: supplier.bank_name ?? '',
+            account_number: supplier.account_number ?? '',
+          }
+          return all
+        }, {
+          [r.project_id]: {
+            ...EMPTY_SUPPLIER,
+            supplier_name: r.vendor_name ?? r.quotations?.[0]?.vendor?.name ?? '',
+            supplier_address: r.vendor_location ?? r.quotations?.[0]?.vendor?.address ?? '',
+            payment_method: r.supplier_payment_method ?? '',
+            bank_name: r.supplier_bank_name ?? '',
+            account_number: r.supplier_account_number ?? '',
+          },
+        }),
+        supplier_payment_method: r.supplier_payment_method ?? r.project_suppliers?.[0]?.payment_method ?? '',
+        payment_accounts:
+          savedAccounts.some(
+            (account) =>
+              account.bank_name || account.account_number || account.account_holder_name || account.phone_number,
+          )
+            ? savedAccounts
+            : r.project_suppliers?.[0]?.account_number || r.project_suppliers?.[0]?.bank_name
+              ? [
+                  {
+                    bank_name: r.project_suppliers[0].bank_name ?? '',
+                    account_number: r.project_suppliers[0].account_number ?? '',
+                    account_holder_name: r.supplier_account_holder_name ?? '',
+                    phone_number: r.supplier_phone_number ?? '',
+                  },
+                ]
+              : [{ ...EMPTY_ACCOUNT }],
         justification: r.justification ?? '',
         required_date: r.required_date ?? '',
       })
@@ -147,7 +259,15 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             }))
           : [{ ...EMPTY_ITEM }],
       )
-      setExistingProforma(r.attachments?.find((a) => a.attachment_type === 'proforma')?.file_name ?? null)
+      const proformas: Record<string, string> = {}
+      for (const attachment of r.attachments ?? []) {
+        if (attachment.attachment_type === 'proforma') {
+          if (attachment.project_id || !r.project_suppliers?.length) {
+            proformas[attachment.project_id ?? r.project_id] = attachment.file_name
+          }
+        }
+      }
+      setExistingProformas(proformas)
       setLoadingEdit(false)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -163,17 +283,50 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     setItems((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
 
+  function updateSupplier(projectId: string, key: keyof SupplierFields, value: string) {
+    setTouched(true)
+    setForm((f) => ({
+      ...f,
+      suppliers: {
+        ...f.suppliers,
+        [projectId]: { ...(f.suppliers[projectId] ?? EMPTY_SUPPLIER), [key]: value },
+      },
+    }))
+  }
+
   function toggleProject(id: string) {
     setTouched(true)
     setForm((f) => ({
       ...f,
       project_ids: f.project_ids.includes(id) ? f.project_ids.filter((p) => p !== id) : [...f.project_ids, id],
+      suppliers: { ...f.suppliers, [id]: f.suppliers[id] ?? { ...EMPTY_SUPPLIER } },
     }))
   }
 
   function addItem(projectId: string) {
     setTouched(true)
     setItems((rows) => [...rows, { ...EMPTY_ITEM, project_id: projectId }])
+  }
+
+  function updateAccount(index: number, patch: Partial<SupplierPaymentAccount>) {
+    setTouched(true)
+    setForm((f) => ({
+      ...f,
+      payment_accounts: f.payment_accounts.map((account, i) => (i === index ? { ...account, ...patch } : account)),
+    }))
+  }
+
+  function addAccount() {
+    setTouched(true)
+    setForm((f) => ({ ...f, payment_accounts: [...f.payment_accounts, { ...EMPTY_ACCOUNT }] }))
+  }
+
+  function removeAccount(index: number) {
+    setTouched(true)
+    setForm((f) => ({
+      ...f,
+      payment_accounts: f.payment_accounts.length <= 1 ? [{ ...EMPTY_ACCOUNT }] : f.payment_accounts.filter((_, i) => i !== index),
+    }))
   }
 
   const selectedProjects = form.project_ids
@@ -186,15 +339,47 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const itemsTotal = filledItems.reduce((sum, r) => sum + lineTotal(r), 0)
   const totalFor = (projectId: string) => filledItems.filter((r) => projectOf(r) === projectId).reduce((sum, r) => sum + lineTotal(r), 0)
   const emptyProject = multiProject ? selectedProjects.find((p) => !filledItems.some((r) => projectOf(r) === p.id)) : undefined
-  const hasVendorDetails = !!(form.vendor_name.trim() && form.vendor_location.trim())
-
-  const accountDigits = form.supplier_account_number.replace(/\D/g, '')
-  const paymentError =
-    form.supplier_account_number.trim() && !/^[\d\s+-]+$/.test(form.supplier_account_number.trim())
-      ? 'Use digits only for the account or Telebirr number'
-      : form.supplier_payment_method === 'telebirr' && accountDigits && (accountDigits.length < 9 || accountDigits.length > 12)
-        ? 'Enter a valid Telebirr phone number, e.g. 0912345678'
-        : null
+  const hasSupplierDetails = form.project_ids.length > 0 && form.project_ids.every((id) => {
+    const supplier = form.suppliers[id] ?? EMPTY_SUPPLIER
+    return !!(supplier.supplier_name.trim() && supplier.supplier_address.trim() && supplier.supplier_phone.trim())
+  })
+  const filledAccounts = form.payment_accounts.filter(
+    (account) =>
+      account.bank_name.trim() ||
+      account.account_number.trim() ||
+      account.account_holder_name.trim() ||
+      account.phone_number.trim(),
+  )
+  const primaryAccount = filledAccounts[0]
+  const hasPaymentDetails = !!(
+    form.supplier_payment_method
+    && primaryAccount?.account_number.trim()
+    && (form.supplier_payment_method !== 'bank' || primaryAccount.bank_name.trim())
+  )
+  const paymentError = (() => {
+    if (form.supplier_payment_method === 'telebirr') {
+      const digits = (primaryAccount?.account_number ?? '').replace(/\D/g, '')
+      if (primaryAccount?.account_number.trim() && !/^[\d\s+-]+$/.test(primaryAccount.account_number.trim())) {
+        return 'Use digits only for the Telebirr number'
+      }
+      if (digits && (digits.length < 9 || digits.length > 12)) {
+        return 'Enter a valid Telebirr phone number, e.g. 0912345678'
+      }
+      return null
+    }
+    for (const [index, account] of form.payment_accounts.entries()) {
+      if (account.account_number.trim() && !/^[\d\s+-]+$/.test(account.account_number.trim())) {
+        return `Account ${index + 1}: use digits only for the account number`
+      }
+      if (account.phone_number.trim() && !/^[\d\s+-]+$/.test(account.phone_number.trim())) {
+        return `Account ${index + 1}: use digits only for the phone number`
+      }
+    }
+    return null
+  })()
+  const hasProformas = selectedProjects.length > 0 && selectedProjects.every((project) =>
+    !!(proformaFiles[project.id] || existingProformas[project.id]),
+  )
 
   const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || !(Number(r.unit_price) > 0))
   const projectError = loadingProjects
@@ -203,16 +388,16 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       ? 'Could not load projects. Try again.'
       : projects.length === 0
         ? 'No active projects are available. Ask an admin to add or activate one before creating a purchase request.'
-        : 'Choose which project this purchase is for'
+        : 'Choose the project location for this purchase'
 
   const stepErrors: Record<number, string | null> = {
     0: !form.title.trim() ? 'Add a short title for this request' : !form.project_ids.length ? projectError : null,
     1: !filledItems.length
-      ? 'Add at least one item'
+      ? 'Add at least one material'
       : badItem
-        ? 'Each item needs a name, a quantity and a unit price'
+        ? 'Each material needs a type, quantity and price per piece'
         : emptyProject
-          ? `Add at least one item for ${emptyProject.name}, or remove that project`
+          ? `Add at least one material for ${emptyProject.name}, or remove that project`
           : null,
     2: null,
     3: paymentError,
@@ -252,24 +437,59 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       notify.warning(stepErrors[firstInvalid]!)
       return
     }
-    if (submitAfter && !hasVendorDetails) {
+    if (submitAfter && (!hasSupplierDetails || !hasPaymentDetails)) {
       setShowErrors(true)
       setStep(3)
-      notify.warning('Enter the supplier name and location')
+      notify.warning('Complete supplier, contact, and payment details for every selected project')
+      return
+    }
+    if (submitAfter && !hasProformas) {
+      setShowErrors(true)
+      setStep(3)
+      notify.warning('Upload a Proforma for every selected project')
       return
     }
     setBusy(true)
 
+    const primarySupplier = form.suppliers[form.project_ids[0]] ?? EMPTY_SUPPLIER
+    const accountsPayload = filledAccounts.map((account) => ({
+      bank_name: account.bank_name.trim(),
+      account_number: account.account_number.trim(),
+      account_holder_name: account.account_holder_name.trim(),
+      phone_number: account.phone_number.trim(),
+    }))
+    const method =
+      accountsPayload.length === 0
+        ? ''
+        : form.supplier_payment_method || 'bank'
     const input: RequestInput = {
       title: form.title.trim(),
       description: form.description.trim(),
       project_id: form.project_ids[0],
       project_ids: form.project_ids,
-      vendor_name: form.vendor_name.trim(),
-      vendor_location: form.vendor_location.trim(),
-      supplier_payment_method: form.supplier_account_number.trim() ? form.supplier_payment_method : '',
-      supplier_bank_name: form.supplier_payment_method === 'bank' ? form.supplier_bank_name.trim() : '',
-      supplier_account_number: form.supplier_payment_method ? form.supplier_account_number.trim() : '',
+      department: form.department.trim() || 'General',
+      estimated_amount: itemsTotal,
+      proforma_amount: itemsTotal,
+      vendor_name: primarySupplier.supplier_name.trim(),
+      vendor_location: primarySupplier.supplier_address.trim(),
+      supplier_payment_method: method,
+      supplier_bank_name: method === 'bank' ? (accountsPayload[0]?.bank_name ?? '') : '',
+      supplier_account_number: accountsPayload[0]?.account_number ?? '',
+      supplier_account_holder_name: accountsPayload[0]?.account_holder_name ?? '',
+      supplier_phone_number: accountsPayload[0]?.phone_number ?? '',
+      supplier_payment_accounts: method === 'telebirr' ? accountsPayload.slice(0, 1) : accountsPayload,
+      project_suppliers: form.project_ids.map((project_id) => {
+        const supplier = form.suppliers[project_id] ?? EMPTY_SUPPLIER
+        return {
+          project_id,
+          supplier_name: supplier.supplier_name.trim(),
+          supplier_address: supplier.supplier_address.trim(),
+          supplier_phone: supplier.supplier_phone.trim(),
+          payment_method: method,
+          bank_name: method === 'bank' ? (accountsPayload[0]?.bank_name ?? '') : '',
+          account_number: accountsPayload[0]?.account_number ?? '',
+        }
+      }),
       justification: form.justification.trim(),
       required_date: form.required_date || null,
     }
@@ -304,17 +524,31 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         description: r.description.trim() || null,
       })),
     )
-    if (itemsError) notify.warning(`Line items were not saved: ${itemsError}`)
+    if (itemsError) {
+      setBusy(false)
+      notify.error(`Request saved, but line items could not be saved: ${itemsError}`)
+      announcePurchaseSaved(requestId)
+      navigate(`/requests/${requestId}`)
+      return
+    }
 
-    if (proformaFile) {
-      const { error } = await attachFile(requestId, proformaFile, 'proforma', 'Supplier Proforma')
+    for (const project of selectedProjects) {
+      const file = proformaFiles[project.id]
+      if (!file) continue
+      const { error } = await attachFile(
+        requestId,
+        file,
+        'proforma',
+        `Supplier Proforma - ${project.name}`,
+        project.id,
+      )
       if (error) {
         setBusy(false)
-        notify.error(`Request saved, but the Proforma could not be uploaded: ${error}`)
+        notify.error(`Request saved, but the Proforma for ${project.name} could not be uploaded: ${error}`)
         return
       }
-      setExistingProforma(proformaFile.name)
-      setProformaFile(null)
+      setExistingProformas((current) => ({ ...current, [project.id]: file.name }))
+      setProformaFiles((current) => ({ ...current, [project.id]: null }))
     }
 
     if (submitAfter) {
@@ -350,7 +584,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       onGoTo={goTo}
       onSubmit={() => save(true)}
       submitLabel="Submit for Finance review"
-      submitDisabled={!hasVendorDetails}
+      submitDisabled={!hasSupplierDetails || !hasPaymentDetails || !hasProformas}
       secondaryAction={{ label: editing ? 'Save changes' : 'Save as draft', onClick: () => save(false) }}
       discardPrompt={editing ? 'Discard your changes?' : 'Discard this request?'}
       busy={busy}
@@ -384,16 +618,24 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
 
       {!loadingEdit && step === 0 && (
         <>
+          <Field label="Requested By">
+            <input
+              value={profile?.full_name || profile?.email || ''}
+              readOnly
+              className={clsx(inputClass, 'border-transparent bg-[var(--canvas)] text-[var(--ink-soft)]')}
+            />
+          </Field>
+
           <Field label="Title" error={err(0, !form.title.trim())}>
             <input
               value={form.title}
               onChange={(e) => update('title', e.target.value)}
-              placeholder="e.g. Structural steel beams"
+              placeholder="e.g. AI control room final board work"
               className={clsx(inputClass, 'text-base', err(0, !form.title.trim()) ? 'border-[var(--accent)]' : 'border-transparent')}
             />
           </Field>
 
-          <Field label="Projects" error={err(0, !form.project_ids.length)}>
+          <Field label="Project Location" error={err(0, !form.project_ids.length)}>
             <p className="mb-2 text-xs text-slate-500">Pick one project, or several when the same supplier delivers for more than one.</p>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {projects.map((p) => {
@@ -420,8 +662,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                     <span className="min-w-0">
                       <span className="block truncate text-sm font-medium">{p.name}</span>
                       <span className={clsx('block truncate text-xs', active ? 'text-white/55' : 'text-slate-500')}>
-                        {p.code}
-                        {p.client_name ? ` · ${p.client_name}` : ''}
+                        {[p.code, p.location, p.client_name].filter(Boolean).join(' · ')}
                       </span>
                     </span>
                   </button>
@@ -450,24 +691,22 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </div>
           </Field>
 
-          <div className="grid grid-cols-1 gap-5">
-            <Field label="Description" optional>
-              <textarea
-                value={form.description}
-                onChange={(e) => update('description', e.target.value)}
-                rows={3}
-                placeholder="What is this purchase for?"
-                className={clsx(inputClass, 'resize-none border-transparent')}
-              />
-            </Field>
-          </div>
+          <Field label="Reason for material" optional>
+            <textarea
+              value={form.description}
+              onChange={(e) => update('description', e.target.value)}
+              rows={3}
+              placeholder="Why is this material needed?"
+              className={clsx(inputClass, 'resize-none border-transparent')}
+            />
+          </Field>
         </>
       )}
 
       {!loadingEdit && step === 1 && (
         <>
           <p className="text-sm text-[var(--ink-soft)]">
-            List what you are buying with a unit price for each. The total is calculated for you.
+            List each material with quantity and price per piece. Total price is calculated for you.
           </p>
           <datalist id="item-units">
             {UNITS.map((u) => (
@@ -495,7 +734,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                       <div className="mb-3 flex items-center justify-between gap-2">
                         <span className="flex items-center gap-2 text-sm font-semibold text-[var(--ink)]">
                           <Package size={15} className="text-slate-400" />
-                          Item {n + 1}
+                          Material {n + 1}
                         </span>
                         <span className="flex items-center gap-2">
                           {lineTotal(r) > 0 && <span className="text-sm font-bold text-[var(--ink)]">{money(lineTotal(r))}</span>}
@@ -506,7 +745,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                                 setTouched(true)
                                 setItems((all) => all.filter((_, idx) => idx !== i))
                               }}
-                              aria-label={`Remove item ${n + 1}${group ? ` for ${group.name}` : ''}`}
+                              aria-label={`Remove material ${n + 1}${group ? ` for ${group.name}` : ''}`}
                               className="focus-ring rounded-full p-1.5 text-slate-400 transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
                             >
                               <Trash2 size={16} />
@@ -517,8 +756,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                       <input
                         value={r.name}
                         onChange={(e) => updateItem(i, { name: e.target.value })}
-                        placeholder="Item name, e.g. HEB 200 steel beam"
-                        aria-label={`Item ${n + 1} name`}
+                        placeholder="Material type, e.g. Board"
+                        aria-label={`Material ${n + 1} type`}
                         className={clsx(inputClass, 'border-transparent')}
                       />
                       <div className="mt-2 grid grid-cols-3 gap-2">
@@ -529,8 +768,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                           step="any"
                           value={r.quantity}
                           onChange={(e) => updateItem(i, { quantity: e.target.value })}
-                          placeholder="Qty"
-                          aria-label={`Item ${n + 1} quantity`}
+                          placeholder="Quantity"
+                          aria-label={`Material ${n + 1} quantity`}
                           className={clsx(inputClass, 'border-transparent')}
                         />
                         <input
@@ -538,7 +777,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                           value={r.unit}
                           onChange={(e) => updateItem(i, { unit: e.target.value })}
                           placeholder="Unit"
-                          aria-label={`Item ${n + 1} unit`}
+                          aria-label={`Material ${n + 1} unit`}
                           className={clsx(inputClass, 'border-transparent')}
                         />
                         <input
@@ -548,8 +787,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                           step="0.01"
                           value={r.unit_price}
                           onChange={(e) => updateItem(i, { unit_price: e.target.value })}
-                          placeholder="Unit price ETB"
-                          aria-label={`Item ${n + 1} unit price`}
+                          placeholder="Price per piece"
+                          aria-label={`Material ${n + 1} price per piece`}
                           className={clsx(inputClass, invalid && !(Number(r.unit_price) > 0) ? 'border-[var(--accent)]' : 'border-transparent')}
                         />
                       </div>
@@ -557,7 +796,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                         value={r.description}
                         onChange={(e) => updateItem(i, { description: e.target.value })}
                         placeholder="Specs or notes (optional)"
-                        aria-label={`Item ${n + 1} description`}
+                        aria-label={`Material ${n + 1} notes`}
                         className={clsx(inputClass, 'mt-2 border-transparent')}
                       />
                     </div>
@@ -569,24 +808,46 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                   className="focus-ring flex w-full items-center justify-center gap-2 rounded-[1.5rem] border-2 border-dashed border-black/10 py-4 text-sm font-medium text-[var(--ink)] transition-colors hover:border-black/30"
                 >
                   <Plus size={16} />
-                  {group ? `Add item for ${group.name}` : 'Add another item'}
+                  {group ? `Add material for ${group.name}` : 'Add another material'}
                 </button>
               </section>
             )
           })}
           <div className="flex items-center justify-between rounded-[1.5rem] bg-[var(--ink)] px-5 py-4 text-white">
             <span className="text-sm text-white/70">
-              {filledItems.length} item{filledItems.length === 1 ? '' : 's'} · total
+              {filledItems.length} material{filledItems.length === 1 ? '' : 's'} · total price
             </span>
             <span className="text-2xl font-black tracking-tight">{money(itemsTotal)}</span>
           </div>
+          {duplicateCheckError && (
+            <p role="status" className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-slate-600">
+              Could not check for similar requests right now. You can continue, but please review the request list for possible duplicates.
+            </p>
+          )}
+          {duplicateMatches.length > 0 && (
+            <div role="status" className="rounded-[1.5rem] border border-[var(--sun)] bg-[var(--sun-soft)] p-4">
+              <p className="text-sm font-bold text-[var(--ink)]">Possible duplicate items found</p>
+              <p className="mt-1 text-xs text-[var(--ink-soft)]">This is a warning only; you can still submit the request.</p>
+              <ul className="mt-3 space-y-2">
+                {duplicateMatches.slice(0, 5).map((match) => (
+                  <li key={`${match.id}-${match.project_id}`} className="text-sm text-[var(--ink)]">
+                    <span className="font-semibold">{match.item_name}</span> for {match.project_name} already appears in{' '}
+                    <span className="font-semibold">{match.request_number}</span> ({match.title}, {match.status.replace(/_/g, ' ')}).
+                  </li>
+                ))}
+                {duplicateMatches.length > 5 && (
+                  <li className="text-xs text-[var(--ink-soft)]">{duplicateMatches.length - 5} more possible matches</li>
+                )}
+              </ul>
+            </div>
+          )}
         </>
       )}
 
       {!loadingEdit && step === 2 && (
         <>
           <div className="rounded-[1.5rem] bg-[var(--canvas)] px-5 py-4">
-            <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Total (from your items)</p>
+            <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Total Price</p>
             <p className="mt-1 text-4xl font-black tracking-tight text-[var(--ink)] sm:text-5xl">{money(itemsTotal)}</p>
             {multiProject && (
               <ul className="mt-3 space-y-1 border-t border-black/[0.06] pt-3 text-sm">
@@ -599,7 +860,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
               </ul>
             )}
             <button type="button" onClick={() => setStep(1)} className="mt-2 text-xs font-semibold text-[var(--ink)] underline underline-offset-2">
-              Change items or prices
+              Change materials or prices
             </button>
           </div>
 
@@ -616,12 +877,12 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </div>
           </Field>
 
-          <Field label="Justification" optional>
+          <Field label="Extra notes for reviewers" optional>
             <textarea
               value={form.justification}
               onChange={(e) => update('justification', e.target.value)}
               rows={4}
-              placeholder="Why is this needed? Reviewers will use this to assess the request."
+              placeholder="Anything else reviewers should know."
               className={clsx(inputClass, 'resize-none border-transparent')}
             />
           </Field>
@@ -631,30 +892,64 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       {!loadingEdit && step === 3 && (
         <>
           <p className="text-sm text-[var(--ink-soft)]">
-            Enter the supplier details and Proforma amount. Attaching the Proforma document is optional.
+            Enter supplier contact details and attach a Proforma for each selected project, then add payment accounts.
           </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Supplier name">
-              <input
-                value={form.vendor_name}
-                onChange={(e) => update('vendor_name', e.target.value)}
-                placeholder="Supplier or company name"
-                className={clsx(inputClass, 'border-transparent')}
-              />
-            </Field>
-            <Field label="Supplier location">
-              <input
-                value={form.vendor_location}
-                onChange={(e) => update('vendor_location', e.target.value)}
-                placeholder="City, site, or address"
-                className={clsx(inputClass, 'border-transparent')}
-              />
-            </Field>
-          </div>
-          <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
-            Proforma amount: <span className="font-semibold text-[var(--ink)]">{money(itemsTotal)}</span>, the total of your items.
-          </p>
-          <Field label="Payment details for Finance" optional>
+          {selectedProjects.map((project) => {
+            const supplier = form.suppliers[project.id] ?? EMPTY_SUPPLIER
+            return (
+              <section key={project.id} className="space-y-3 rounded-[1.5rem] border border-black/10 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-[var(--ink)]">
+                    <Building2 size={16} className="shrink-0 text-[var(--accent)]" />
+                    <span className="truncate">{project.name}</span>
+                  </div>
+                  <span className="shrink-0 text-sm font-semibold text-[var(--ink)]">{money(totalFor(project.id))}</span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Field label="Supplier name">
+                    <input
+                      value={supplier.supplier_name}
+                      onChange={(e) => updateSupplier(project.id, 'supplier_name', e.target.value)}
+                      placeholder="Supplier or company name"
+                      className={clsx(inputClass, 'border-transparent')}
+                    />
+                  </Field>
+                  <Field label="Supplier address">
+                    <input
+                      value={supplier.supplier_address}
+                      onChange={(e) => updateSupplier(project.id, 'supplier_address', e.target.value)}
+                      placeholder="City, site, or address"
+                      className={clsx(inputClass, 'border-transparent')}
+                    />
+                  </Field>
+                  <Field label="Supplier contact phone">
+                    <input
+                      type="tel"
+                      value={supplier.supplier_phone}
+                      onChange={(e) => updateSupplier(project.id, 'supplier_phone', e.target.value)}
+                      placeholder="Supplier phone number"
+                      className={clsx(inputClass, 'border-transparent')}
+                    />
+                  </Field>
+                </div>
+                {existingProformas[project.id] && (
+                  <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                    Attached Proforma: <span className="font-semibold text-[var(--ink)]">{existingProformas[project.id]}</span>
+                  </p>
+                )}
+                <Field label={`Proforma for ${project.name}`}>
+                  <DropZone
+                    file={proformaFiles[project.id] ?? null}
+                    onFile={(file) => {
+                      setTouched(true)
+                      setProformaFiles((current) => ({ ...current, [project.id]: file }))
+                    }}
+                  />
+                </Field>
+              </section>
+            )
+          })}
+          <Field label="Payment accounts">
             <div className="grid grid-cols-2 gap-2" role="group" aria-label="Payment method">
               {(Object.keys(PAYMENT_METHOD_LABELS) as SupplierPaymentMethod[]).map((method) => {
                 const active = form.supplier_payment_method === method
@@ -663,7 +958,14 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                     key={method}
                     type="button"
                     aria-pressed={active}
-                    onClick={() => update('supplier_payment_method', active ? '' : method)}
+                    onClick={() => {
+                      setTouched(true)
+                      setForm((f) => ({
+                        ...f,
+                        supplier_payment_method: active ? '' : method,
+                        payment_accounts: active ? [{ ...EMPTY_ACCOUNT }] : method === 'telebirr' ? [f.payment_accounts[0] ?? { ...EMPTY_ACCOUNT }] : f.payment_accounts,
+                      }))
+                    }}
                     className={clsx(
                       'focus-ring rounded-2xl border px-4 py-3 text-sm font-medium transition-colors',
                       active ? 'border-[var(--ink)] bg-[var(--ink)] text-white' : 'border-black/10 text-[var(--ink)] hover:border-black/30',
@@ -674,39 +976,95 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 )
               })}
             </div>
-            {form.supplier_payment_method && (
-              <div className={clsx('mt-2 grid grid-cols-1 gap-2', form.supplier_payment_method === 'bank' && 'sm:grid-cols-2')}>
-                {form.supplier_payment_method === 'bank' && (
-                  <input
-                    value={form.supplier_bank_name}
-                    onChange={(e) => update('supplier_bank_name', e.target.value)}
-                    placeholder="Bank name, e.g. CBE"
-                    aria-label="Bank name"
-                    className={clsx(inputClass, 'border-transparent')}
-                  />
-                )}
+
+            {form.supplier_payment_method === 'telebirr' && (
+              <div className="mt-3 space-y-2">
                 <input
-                  value={form.supplier_account_number}
-                  onChange={(e) => update('supplier_account_number', e.target.value)}
+                  value={form.payment_accounts[0]?.account_number ?? ''}
+                  onChange={(e) => updateAccount(0, { account_number: e.target.value, bank_name: '', account_holder_name: form.payment_accounts[0]?.account_holder_name ?? '' })}
                   inputMode="numeric"
-                  placeholder={form.supplier_payment_method === 'bank' ? 'Account number' : 'Telebirr phone number, e.g. 0912345678'}
-                  aria-label={form.supplier_payment_method === 'bank' ? 'Account number' : 'Telebirr number'}
+                  placeholder="Telebirr phone number, e.g. 0912345678"
+                  aria-label="Telebirr number"
                   className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
+                />
+                <input
+                  value={form.payment_accounts[0]?.account_holder_name ?? ''}
+                  onChange={(e) => updateAccount(0, { account_holder_name: e.target.value })}
+                  placeholder="Account holder name"
+                  aria-label="Account holder name"
+                  className={clsx(inputClass, 'border-transparent')}
                 />
               </div>
             )}
+
+            {(form.supplier_payment_method === 'bank' || !form.supplier_payment_method) && (
+              <div className="mt-3 space-y-3">
+                {form.payment_accounts.map((account, index) => (
+                  <div key={index} className="rounded-[1.25rem] border border-black/10 bg-white p-3">
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-[var(--ink)]">Account {index + 1}</p>
+                      {form.payment_accounts.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeAccount(index)}
+                          aria-label={`Remove account ${index + 1}`}
+                          className="focus-ring rounded-full p-1.5 text-slate-400 hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <input
+                        value={account.bank_name}
+                        onChange={(e) => updateAccount(index, { bank_name: e.target.value })}
+                        placeholder="Bank name, e.g. CBE"
+                        aria-label={`Bank name for account ${index + 1}`}
+                        className={clsx(inputClass, 'border-transparent')}
+                      />
+                      <input
+                        value={account.account_number}
+                        onChange={(e) => updateAccount(index, { account_number: e.target.value })}
+                        inputMode="numeric"
+                        placeholder="Account number"
+                        aria-label={`Account number ${index + 1}`}
+                        className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
+                      />
+                      <input
+                        value={account.account_holder_name}
+                        onChange={(e) => updateAccount(index, { account_holder_name: e.target.value })}
+                        placeholder="Account holder name"
+                        aria-label={`Account holder name ${index + 1}`}
+                        className={clsx(inputClass, 'border-transparent')}
+                      />
+                      <input
+                        value={account.phone_number}
+                        onChange={(e) => updateAccount(index, { phone_number: e.target.value })}
+                        inputMode="tel"
+                        placeholder="Phone number"
+                        aria-label={`Phone number ${index + 1}`}
+                        className={clsx(inputClass, 'border-transparent')}
+                      />
+                    </div>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={addAccount}
+                  className="focus-ring flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-black/10 py-3 text-sm font-medium text-[var(--ink)] hover:border-black/30"
+                >
+                  <Plus size={16} />
+                  Add another account
+                </button>
+              </div>
+            )}
             {err(3, !!paymentError) && <p className="mt-2 text-xs font-medium text-[var(--accent)]">{paymentError}</p>}
-            <p className="mt-2 text-xs text-slate-500">Only Finance and Admin can see these details. Finance uses them to transfer the payment.</p>
+            <p className="mt-2 text-xs text-slate-500">Only Finance, Admin, and the requester can see payment details. Add every bank account the supplier uses.</p>
           </Field>
-          {existingProforma && !proformaFile && (
-            <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
-              Attached Proforma: <span className="font-semibold text-[var(--ink)]">{existingProforma}</span>
-            </p>
-          )}
-          <DropZone file={proformaFile} onFile={(file) => {
-            setTouched(true)
-            setProformaFile(file)
-          }} />
+          <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+            Each selected project needs its own supplier details and Proforma. Project line totals add up to{' '}
+            <span className="font-semibold text-[var(--ink)]">{money(itemsTotal)}</span>.
+          </p>
         </>
       )}
 
@@ -725,7 +1083,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <ReviewTile
-              label="Items"
+              label="Materials"
               value={filledItems.length ? `${filledItems.length} · ${money(itemsTotal)}` : 'None listed'}
               onEdit={() => setStep(1)}
             />
@@ -737,29 +1095,33 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             <ReviewTile
               label="Pay to"
               value={
-                form.supplier_payment_method && form.supplier_account_number.trim()
-                  ? `${PAYMENT_METHOD_LABELS[form.supplier_payment_method]} · ${form.supplier_account_number.trim()}`
+                filledAccounts.length
+                  ? filledAccounts
+                      .map((account) =>
+                        [account.bank_name, account.account_number, account.account_holder_name].filter(Boolean).join(' · '),
+                      )
+                      .join(' | ')
                   : 'Not provided'
               }
               onEdit={() => setStep(3)}
             />
             <ReviewTile
               label="Supplier / Proforma"
-              value={hasVendorDetails ? `${form.vendor_name} · ${money(itemsTotal)}` : 'Incomplete'}
+              value={hasSupplierDetails && hasProformas ? `${selectedProjects.length} Proforma${selectedProjects.length === 1 ? '' : 's'} attached` : 'Incomplete'}
               onEdit={() => setStep(3)}
             />
           </div>
 
           {filledItems.length > 0 && (
             <div className="rounded-[1.5rem] border border-black/10 p-5">
-              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Items</p>
+              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Materials</p>
               <ul className="mt-2 divide-y divide-black/[0.05]">
                 {filledItems.map((r, i) => (
                   <li key={i} className="flex items-center justify-between gap-3 py-2 text-sm">
                     <span className="min-w-0 truncate text-[var(--ink)]">
                       {r.name}
                       <span className="text-slate-500">
-                        {' '}· {r.quantity} {r.unit}
+                        {' '}· {r.quantity} × {money(Number(r.unit_price) || 0)}
                       </span>
                     </span>
                     <span className="shrink-0 font-semibold text-[var(--ink)]">{money(lineTotal(r))}</span>
@@ -769,20 +1131,20 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </div>
           )}
 
-          {form.justification && (
+          {(form.description || form.justification) && (
             <div className="rounded-[1.5rem] border border-black/10 p-5">
-              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Justification</p>
-              <p className="mt-2 text-sm text-[var(--ink)]">{form.justification}</p>
+              <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Reason for material</p>
+              <p className="mt-2 text-sm text-[var(--ink)]">{form.description || form.justification}</p>
             </div>
           )}
 
-          {!hasVendorDetails ? (
+          {!hasSupplierDetails || !hasPaymentDetails || !hasProformas ? (
             <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--accent-soft)] p-4 text-sm text-[var(--ink)]">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[var(--accent)]">
                 <Info size={16} />
               </span>
               <span>
-                Add the supplier name and location to submit. The Proforma document is optional.{' '}
+                Complete each project's supplier, contact, payment details, and upload its Proforma to submit.{' '}
                 <button type="button" onClick={() => setStep(3)} className="font-semibold underline underline-offset-2">
                   Complete supplier details
                 </button>{' '}
@@ -798,7 +1160,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 {profile?.role === 'project_manager'
                   ? 'Submitting sends this request directly to Finance for review.'
                   : 'Submitting sends this request to the assigned Project Manager, then Finance.'}
-                {!proformaFile && !existingProforma && ' You can submit without the Proforma document.'}
+                {' '}Each project's Proforma is attached to the request.
               </span>
             </div>
           )}

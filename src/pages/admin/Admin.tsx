@@ -6,8 +6,9 @@ import type { Role } from '@/types'
 import { UsersTab } from './UsersTab'
 import { ProjectsTab } from './ProjectsTab'
 import { DepartmentsTab } from './DepartmentsTab'
+import { SiteEmployeesTab } from './SiteEmployeesTab'
 
-type Tab = 'users' | 'projects' | 'departments'
+type Tab = 'users' | 'projects' | 'departments' | 'site-employees'
 
 const TABS: { id: Tab; label: string; icon: typeof Users; roles: Role[]; subtitle: string }[] = [
   { id: 'users', label: 'Users', icon: Users, roles: ['admin'], subtitle: 'Roles and departments decide who approves what' },
@@ -42,7 +43,7 @@ export function Admin() {
 
   return (
     <div className="space-y-5">
-      <PageHeader title={allowed.length === 1 ? current.label : 'Admin'} subtitle={current.subtitle} />
+      <PageHeader title={profile.role === 'ceo' ? 'Projects' : profile.role === 'site_engineer' ? 'Site setup' : 'Admin'} subtitle={current.subtitle} />
 
       {allowed.length > 1 && <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
         {allowed.map((t) => (
@@ -56,6 +57,7 @@ export function Admin() {
       {current.id === 'users' && <UsersTab />}
       {current.id === 'projects' && <ProjectsTab />}
       {current.id === 'departments' && <DepartmentsTab />}
+      {current.id === 'site-employees' && <SiteEmployeesTab />}
     </div>
   )
 }

@@ -25,7 +25,7 @@ export async function fetchTeamMembers(limit?: number): Promise<Profile[]> {
   return data ?? []
 }
 
-export function fetchAllDepartments(opts: { withMemberCount?: boolean } = {}) {
+export function fetchAllDepartments(opts: { activeOnly?: boolean; withMemberCount?: boolean } = {}) {
   return backend.departments.list(opts)
 }
 

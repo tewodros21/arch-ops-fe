@@ -141,24 +141,24 @@ export function ProjectsTab() {
                   <ActivePill active={p.is_active ?? false} />
                 </div>
 
-                <div className="flex justify-end gap-1.5">
-                  {canManage && <>
-                  <button
-                    onClick={() => setEditing(p)}
-                    aria-label={`Edit ${p.name}`}
-                    className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-black/10 text-[var(--ink)] hover:bg-white"
-                  >
-                    <Pencil size={15} />
-                  </button>
-                  <button
-                    onClick={() => remove(p)}
-                    aria-label={`Delete ${p.name}`}
-                    className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-black/10 text-[var(--ink-soft)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                  >
-                    <Trash2 size={15} />
-                  </button>
-                  </>}
-                </div>
+                {canManage && (
+                  <div className="flex justify-end gap-1.5">
+                    <button
+                      onClick={() => setEditing(p)}
+                      aria-label={`Edit ${p.name}`}
+                      className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-black/10 text-[var(--ink)] hover:bg-white"
+                    >
+                      <Pencil size={15} />
+                    </button>
+                    <button
+                      onClick={() => remove(p)}
+                      aria-label={`Delete ${p.name}`}
+                      className="focus-ring flex h-9 w-9 items-center justify-center rounded-full border border-black/10 text-[var(--ink-soft)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                )}
               </li>
             )
           })}

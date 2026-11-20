@@ -30,7 +30,9 @@ export interface Profile {
   is_active: boolean
   avatar_initials: string
   /** Admin-created accounts must set their own password before using the app */
-  must_change_password?: boolean
+  must_change_password: boolean
+  has_all_projects: boolean
+  project_ids: string[]
 }
 
 export interface Project {
@@ -42,7 +44,7 @@ export interface Project {
   budget?: number | null
   is_active?: boolean
   /** Approved or paid spend across the project's requests (filled on admin lists) */
-  spent_amount?: number
+  spent_amount: number
   /** The project's assigned Project Manager (at most one) */
   project_manager_ids?: string[]
 }
@@ -52,8 +54,18 @@ export interface Department {
   name: string
   is_active: boolean
   created_at?: string
-  /** People currently in this department (filled on admin lists) */
-  member_count?: number
+  /** Site employees currently in this department (filled on admin lists) */
+  member_count: number
+}
+
+export interface SiteEmployee {
+  id: string
+  full_name: string
+  department: string
+  is_active: boolean
+  notes: string
+  created_at: string
+  updated_at: string
 }
 
 export interface Vendor {
@@ -107,11 +119,19 @@ export interface Approval {
 
 export type SupplierPaymentMethod = 'bank' | 'telebirr'
 
+export interface SupplierPaymentAccount {
+  bank_name: string
+  account_number: string
+  account_holder_name: string
+  phone_number: string
+}
+
 export type AttachmentType = 'proforma' | 'invoice' | 'receipt' | 'delivery' | 'photo' | 'other'
 
 export interface PurchaseAttachment {
   id: string
   purchase_request_id: string
+  project_id?: string | null
   attachment_type: AttachmentType
   file_path: string
   file_url: string
@@ -121,6 +141,29 @@ export interface PurchaseAttachment {
   uploaded_by: string | null
   uploaded_by_profile?: Profile
   uploaded_at: string
+}
+
+export interface PurchaseProjectSupplier {
+  id?: string
+  project_id: string
+  project?: Pick<Project, 'id' | 'name' | 'code'>
+  supplier_name: string
+  supplier_address: string
+  supplier_phone: string
+  payment_method?: SupplierPaymentMethod | ''
+  bank_name?: string
+  account_number?: string
+}
+
+export interface PurchaseDuplicate {
+  id: string
+  purchase_request_id: string
+  request_number: string
+  title: string
+  status: RequestStatus
+  project_id: string
+  project_name: string
+  item_name: string
 }
 
 export interface PurchaseRequest {
@@ -143,6 +186,10 @@ export interface PurchaseRequest {
   supplier_payment_method?: SupplierPaymentMethod | ''
   supplier_bank_name?: string
   supplier_account_number?: string
+  supplier_account_holder_name?: string
+  supplier_phone_number?: string
+  supplier_payment_accounts?: SupplierPaymentAccount[]
+  project_suppliers?: PurchaseProjectSupplier[]
   requester_id?: string
   requester?: Profile
   required_date?: string | null

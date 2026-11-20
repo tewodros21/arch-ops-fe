@@ -101,7 +101,7 @@ export function UsersTab() {
         <div className="min-w-0 flex-1 text-sm">
           <p className="font-bold text-[var(--ink)]">Adding someone new?</p>
           <p className="mt-0.5 text-[var(--ink-soft)]">
-            Create their account here with a temporary password and share it with them. They change it on their Account page.
+            Create their account here with a temporary password and share it with them. They must change it before they can use the app.
           </p>
         </div>
         <Link
@@ -242,7 +242,10 @@ function EditPersonModal({ person, departments, onClose, onSaved }: { person: Pr
 
   useEffect(() => {
     fetchProjects(false).then(({ data, error }) => {
-      if (error) notify.error('Could not load projects for Project Manager assignment')
+      if (error) {
+        notify.error('Could not load projects for Project Manager assignment')
+        return
+      }
       setProjects(data ?? [])
     })
   }, [])
