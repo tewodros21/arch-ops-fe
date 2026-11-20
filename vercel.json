@@ -2,6 +2,7 @@
   "rewrites": [
     { "source": "/docs", "destination": "/docs/index.html" },
     { "source": "/docs/", "destination": "/docs/index.html" },
+    { "source": "/open", "destination": "/open.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
