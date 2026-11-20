@@ -45,14 +45,14 @@ export function Admin() {
     <div className="space-y-5">
       <PageHeader title={profile.role === 'ceo' ? 'Projects' : profile.role === 'site_engineer' ? 'Site setup' : 'Admin'} subtitle={current.subtitle} />
 
-      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
+      {allowed.length > 1 && <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
         {allowed.map((t) => (
           <button key={t.id} className="chip focus-ring" aria-pressed={t.id === current.id} onClick={() => navigate(`/admin/${t.id}`)}>
             <t.icon size={15} />
             {t.label}
           </button>
         ))}
-      </div>
+      </div>}
 
       {current.id === 'users' && <UsersTab />}
       {current.id === 'projects' && <ProjectsTab />}

@@ -29,6 +29,7 @@ export interface Profile {
   assigned_project_ids?: string[]
   is_active: boolean
   avatar_initials: string
+  /** Admin-created accounts must set their own password before using the app */
   must_change_password: boolean
   has_all_projects: boolean
   project_ids: string[]
@@ -44,6 +45,8 @@ export interface Project {
   is_active?: boolean
   /** Approved or paid spend across the project's requests (filled on admin lists) */
   spent_amount: number
+  /** The project's assigned Project Manager (at most one) */
+  project_manager_ids?: string[]
 }
 
 export interface Department {

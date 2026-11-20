@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Plus, Power, Search, UserCog, UserPlus, Users } from 'lucide-react'
+import { Pencil, Plus, Power, Search, Trash2, UserCog, UserPlus, Users } from 'lucide-react'
 import { Avatar, useConfirm } from '@/components/ui'
 import { Field, FormModal } from '@/components/admin/FormModal'
 import { ProjectAssignmentField } from '@/components/admin/UserFormModal'
 import { NEW_USER_SEARCH, USER_CREATED_EVENT } from '@/constants'
 import { useAuth } from '@/context/AuthContext'
 import { notify } from '@/lib/notify'
-import { fetchAllDepartments, fetchProjects, fetchTeam, updateProfile } from '@/services'
+import { deleteUser, fetchAllDepartments, fetchProjects, fetchTeam, updateProfile } from '@/services'
 import { getInitials } from '@/utils'
 import { ROLE_LABELS, type Department, type Profile, type Project, type Role } from '@/types'
 import { EmptyCard, ListCard } from './shared'
@@ -16,6 +16,7 @@ const ROLES = Object.keys(ROLE_LABELS) as Role[]
 
 export function UsersTab() {
   const { profile: me } = useAuth()
+  const confirm = useConfirm()
   const [people, setPeople] = useState<Profile[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
   const [loading, setLoading] = useState(true)
@@ -62,6 +63,30 @@ export function UsersTab() {
 
       setPeople((list) => list.map((item) => (item.id === person.id ? { ...item, ...data, is_active: isActive } : item)))
       notify.success(`${person.full_name} was ${isActive ? 'activated' : 'deactivated'}`)
+    } finally {
+      setUpdatingIds((ids) => ids.filter((id) => id !== person.id))
+    }
+  }
+
+  async function removePerson(person: Profile) {
+    const ok = await confirm({
+      title: `Delete ${person.full_name}?`,
+      body: 'This permanently removes the account. Only accounts with no activity can be deleted; anyone else is deactivated instead.',
+      confirmLabel: 'Delete user',
+      tone: 'danger',
+      icon: Trash2,
+    })
+    if (!ok) return
+    setUpdatingIds((ids) => [...ids, person.id])
+    try {
+      const { error } = await deleteUser(person.id)
+      if (error) {
+        // in_use carries the backend's reason, e.g. "This user has activity (approvals). Deactivate them instead."
+        notify.error(error.code === 'in_use' ? error.message : `Could not delete this account: ${error.message}`)
+        return
+      }
+      setPeople((list) => list.filter((item) => item.id !== person.id))
+      notify.success(`${person.full_name} was deleted`)
     } finally {
       setUpdatingIds((ids) => ids.filter((id) => id !== person.id))
     }
@@ -150,6 +175,18 @@ export function UsersTab() {
                 >
                   <Pencil size={15} />
                 </button>
+                {me?.role === 'admin' && p.id !== me.id && (
+                  <button
+                    type="button"
+                    onClick={() => removePerson(p)}
+                    disabled={updatingIds.includes(p.id)}
+                    aria-label={`Delete ${p.full_name}`}
+                    title="Delete (only users with no activity)"
+                    className="focus-ring flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-black/10 text-[var(--ink)] hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:cursor-wait disabled:opacity-50"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                )}
               </div>
             </li>
           ))}

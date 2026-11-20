@@ -4,6 +4,8 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import {
   Home,
   Login,
+  ForgotPassword,
+  ResetPassword,
   Dashboard,
   RequestList,
   RequestDetail,
@@ -21,6 +23,8 @@ export function AppRoutes() {
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route
         element={
           <ProtectedRoute>
