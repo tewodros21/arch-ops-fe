@@ -99,9 +99,9 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
         />
       </Field>
       <Field label="Role" htmlFor="u-role">
-        <select id="u-role" value={role} onChange={(e) => setRole(e.target.value as Role)} className="field">
+        <select id="u-role" value={role} onChange={(e) => setRole(e.target.value as Role)} className="field ">
           {ROLES.map((r) => (
-            <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+            <option className="" key={r} value={r}>{ROLE_LABELS[r]}</option>
           ))}
         </select>
       </Field>
