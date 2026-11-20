@@ -10,3 +10,13 @@ export async function changePassword(newPassword: string, currentPassword: strin
   const { error } = await backend.auth.changePassword(newPassword, currentPassword)
   return { error: error?.message ?? null }
 }
+
+export async function requestPasswordReset(email: string) {
+  const { error } = await backend.auth.requestPasswordReset(email)
+  return { error: error?.message ?? null }
+}
+
+export async function confirmPasswordReset(uid: string, token: string, newPassword: string) {
+  const { error } = await backend.auth.confirmPasswordReset(uid, token, newPassword)
+  return { error: error?.message ?? null }
+}

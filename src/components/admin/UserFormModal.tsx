@@ -78,7 +78,7 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
   return (
     <FormModal
       title="Add a person"
-      description="They sign in with this email and temporary password, then must change it before they can use the app."
+      description="They sign in with this email and temporary password, and must choose their own password before using the app."
       icon={UserPlus}
       submitLabel="Create account"
       onSubmit={submit}

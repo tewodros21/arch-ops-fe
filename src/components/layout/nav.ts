@@ -20,6 +20,7 @@ export const NAV: NavEntry[] = [
   { to: '/admin/projects', label: 'Projects', short: 'Projects', icon: FolderKanban, roles: ['ceo'] },
   { to: '/audit', label: 'Audit Log', short: 'Audit', icon: History, roles: ['admin', 'ceo'] },
   { to: '/admin', label: 'Admin', short: 'Admin', icon: Settings2, roles: ['admin'] },
+  { to: '/admin/projects', label: 'Projects', short: 'Projects', icon: FolderKanban, roles: ['ceo'] },
 ]
 
 export function navFor(role: Role) {

@@ -5,9 +5,9 @@ import { useConfirm } from '@/components/ui'
 import { ProjectFormModal } from '@/components/admin/ProjectFormModal'
 import { PROJECT_CREATED_EVENT } from '@/constants'
 import { notify } from '@/lib/notify'
-import { deleteProject, fetchAllProjects } from '@/services'
+import { deleteProject, fetchAllProjects, fetchTeamMembers } from '@/services'
 import { useAuth } from '@/context/AuthContext'
-import type { Project } from '@/types'
+import type { Profile, Project } from '@/types'
 import { formatCurrency } from '@/utils'
 import { ActivePill, EmptyCard, ListCard } from './shared'
 
@@ -15,9 +15,11 @@ const TEMPLATE = 'md:grid-cols-[minmax(0,1.6fr)_minmax(0,1.8fr)_6rem_5rem]'
 const money = (n: number) => formatCurrency(Math.round(n))
 
 export function ProjectsTab() {
-  const { profile } = useAuth()
-  const canManageProjects = profile?.role === 'admin'
   const confirm = useConfirm()
+  const { profile } = useAuth()
+  // The CEO creates projects; editing and deleting stay with Admin
+  const canManage = profile?.role === 'admin'
+  const [team, setTeam] = useState<Profile[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [showArchived, setShowArchived] = useState(false)
@@ -33,6 +35,7 @@ export function ProjectsTab() {
 
   useEffect(() => {
     load()
+    fetchTeamMembers().then(setTeam)
     window.addEventListener(PROJECT_CREATED_EVENT, load)
     return () => window.removeEventListener(PROJECT_CREATED_EVENT, load)
   }, [])
@@ -107,6 +110,12 @@ export function ProjectsTab() {
                         </>
                       )}
                     </p>
+                    <p className="truncate text-xs text-slate-500">
+                      PM:{' '}
+                      {team.find((u) => u.id === p.project_manager_ids?.[0])?.full_name ?? (
+                        <span className="text-[var(--accent)]">Not assigned</span>
+                      )}
+                    </p>
                   </div>
                 </div>
 
@@ -132,7 +141,7 @@ export function ProjectsTab() {
                   <ActivePill active={p.is_active ?? false} />
                 </div>
 
-                {canManageProjects && (
+                {canManage && (
                   <div className="flex justify-end gap-1.5">
                     <button
                       onClick={() => setEditing(p)}

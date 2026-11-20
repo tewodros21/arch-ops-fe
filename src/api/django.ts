@@ -70,12 +70,19 @@ export const djangoBackend: Backend = {
 
     changePassword: (newPassword, currentPassword) =>
       done(http.post('/auth/change-password/', { current_password: currentPassword, new_password: newPassword })),
+
+    requestPasswordReset: (email) =>
+      done(request('POST', '/auth/password-reset/', { body: { email }, auth: false })),
+
+    confirmPasswordReset: (uid, token, newPassword) =>
+      done(request('POST', '/auth/password-reset/confirm/', { body: { uid, token, new_password: newPassword }, auth: false })),
   },
 
   profiles: {
     list: (opts = {}) => list<Profile>('/users/', { ordering: 'full_name' }, opts.limit),
     create: (input) => http.post<Profile>('/users/', input),
     update: (id, patch) => http.patch<Profile>(`/users/${id}/`, patch),
+    remove: (id) => http.delete(`/users/${id}/`),
   },
 
   departments: {

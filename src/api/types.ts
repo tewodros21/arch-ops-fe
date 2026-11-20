@@ -104,7 +104,10 @@ export type VendorInput = Pick<Vendor, 'name' | 'contact_person' | 'phone' | 'em
   is_active: boolean
 }
 
-export type ProjectInput = Pick<Project, 'name' | 'code' | 'client_name' | 'location' | 'budget' | 'is_active'>
+export type ProjectInput = Pick<Project, 'name' | 'code' | 'client_name' | 'location' | 'budget' | 'is_active'> & {
+  /** Assigns (or with null clears) the project's PM */
+  project_manager_id?: string | null
+}
 export type DepartmentInput = Pick<Department, 'name' | 'is_active'>
 export type SiteEmployeeInput = Pick<SiteEmployee, 'full_name' | 'department' | 'is_active' | 'notes'>
 export type SiteEmployeePatch = Partial<SiteEmployeeInput>
@@ -194,6 +197,10 @@ export interface Backend {
     updateMe(patch: Pick<ProfilePatch, 'full_name' | 'avatar_initials'>): Promise<Result<Profile>>
     /** The server verifies the current password first */
     changePassword(newPassword: string, currentPassword: string): Promise<Result>
+    /** Emails a reset link; the reply is the same whether or not the account exists */
+    requestPasswordReset(email: string): Promise<Result>
+    /** Sets a new password from the emailed link (uid + token) */
+    confirmPasswordReset(uid: string, token: string, newPassword: string): Promise<Result>
   }
 
   profiles: {
@@ -202,6 +209,8 @@ export interface Backend {
     create(input: NewUserInput): Promise<Result<Profile>>
     /** Admin edit of a login user's profile, role and project assignments */
     update(id: string, patch: ProfilePatch): Promise<Result<Profile>>
+    /** Admin only: permanent delete, refused with in_use when the user has any history */
+    remove(id: string): Promise<Result>
   }
 
   departments: {
