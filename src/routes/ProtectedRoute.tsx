@@ -18,10 +18,8 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
   // The API refuses everything else until the temporary password is replaced
   if (profile.must_change_password) return <SetPassword />
 
-  if (profile.must_change_password && location.pathname !== '/change-password') {
-    return <Navigate to="/change-password" replace />
-  }
-  if (!profile.must_change_password && location.pathname === '/change-password') {
+  // /change-password (forced-change page) is only for accounts that still need it
+  if (location.pathname === '/change-password') {
     return <Navigate to="/dashboard" replace />
   }
 
