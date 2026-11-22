@@ -166,6 +166,15 @@ export interface PurchaseDuplicate {
   item_name: string
 }
 
+/** A supplier reused from past purchase requests (GET /purchase-requests/supplier-suggestions/) */
+export interface SupplierSuggestion {
+  supplier_name: string
+  supplier_address: string
+  supplier_phone: string
+  payment_method: SupplierPaymentMethod | ''
+  payment_accounts: SupplierPaymentAccount[]
+}
+
 export interface PurchaseRequest {
   id: string
   request_number: string

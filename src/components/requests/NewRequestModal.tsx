@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
@@ -9,6 +9,7 @@ import { EDITABLE_STATUSES, submitRequest } from '@/lib/workflow'
 import { useAuth } from '@/context/AuthContext'
 import { formatCurrency } from '@/utils'
 import { ReviewTile, StepField as Field, StepModal, type Step } from '@/components/ui/StepModal'
+import { SupplierNameField } from './SupplierNameField'
 import {
   announcePurchaseSaved,
   createPurchaseRequest,
@@ -19,7 +20,7 @@ import {
   updatePurchaseRequest,
   type RequestInput,
 } from '@/services/requests'
-import { PAYMENT_METHOD_LABELS, type Project, type PurchaseDuplicate, type SupplierPaymentAccount, type SupplierPaymentMethod } from '@/types'
+import { PAYMENT_METHOD_LABELS, type Project, type PurchaseDuplicate, type SupplierPaymentAccount, type SupplierPaymentMethod, type SupplierSuggestion } from '@/types'
 
 interface ItemRow {
   /** Which selected project the line is for; empty means the first selected project */
@@ -96,6 +97,11 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const [duplicateMatches, setDuplicateMatches] = useState<PurchaseDuplicate[]>([])
   const [duplicateCheckError, setDuplicateCheckError] = useState(false)
   const [touched, setTouched] = useState(false)
+  /** Step-3 target (by element id) currently flashing the attention ring */
+  const [highlightId, setHighlightId] = useState<string | null>(null)
+  /** Deferred scroll/focus timer and the highlight-clear timer, cleared on rerun/unmount */
+  const scrollTimerRef = useRef<number | null>(null)
+  const highlightTimerRef = useRef<number | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [items, setItems] = useState<ItemRow[]>([{ ...EMPTY_ITEM }])
   const [proformaFiles, setProformaFiles] = useState<Record<string, File | null>>({})
@@ -137,6 +143,12 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     return () => {
       active = false
     }
+  }, [])
+
+  // Clear pending scroll/highlight timers on unmount
+  useEffect(() => () => {
+    if (scrollTimerRef.current != null) window.clearTimeout(scrollTimerRef.current)
+    if (highlightTimerRef.current != null) window.clearTimeout(highlightTimerRef.current)
   }, [])
 
   useEffect(() => {
@@ -294,6 +306,33 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     }))
   }
 
+  /** Apply a picked suggestion: name/address/phone go to that project's block only;
+   * payment method/accounts are request-level, so they replace the shared set. */
+  function applySupplierSuggestion(projectId: string, suggestion: SupplierSuggestion) {
+    updateSupplier(projectId, 'supplier_name', suggestion.supplier_name)
+    updateSupplier(projectId, 'supplier_address', suggestion.supplier_address)
+    updateSupplier(projectId, 'supplier_phone', suggestion.supplier_phone)
+    setTouched(true)
+    setForm((f) => {
+      const method = suggestion.payment_method || f.supplier_payment_method
+      if (suggestion.payment_accounts.length === 0) {
+        return { ...f, supplier_payment_method: method }
+      }
+      const accounts = suggestion.payment_accounts.map((account) => ({
+        bank_name: account.bank_name ?? '',
+        account_number: account.account_number ?? '',
+        account_holder_name: account.account_holder_name ?? '',
+        phone_number: account.phone_number ?? '',
+      }))
+      return {
+        ...f,
+        supplier_payment_method: method,
+        // Same rule as the payment-method toggle and save: telebirr keeps one account
+        payment_accounts: method === 'telebirr' ? accounts.slice(0, 1) : accounts,
+      }
+    })
+  }
+
   function toggleProject(id: string) {
     setTouched(true)
     setForm((f) => ({
@@ -381,6 +420,35 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     !!(proformaFiles[project.id] || existingProformas[project.id]),
   )
 
+  /** One entry per concrete gap blocking submission; drives the Review-step banner links */
+  interface MissingItem { targetId: string; label: string }
+  const missingItems: MissingItem[] = []
+  for (const project of selectedProjects) {
+    const supplier = form.suppliers[project.id] ?? EMPTY_SUPPLIER
+    if (!supplier.supplier_name.trim()) {
+      missingItems.push({ targetId: `supplier-name-${project.id}`, label: `Supplier name for ${project.name}` })
+    }
+    if (!supplier.supplier_address.trim()) {
+      missingItems.push({ targetId: `supplier-address-${project.id}`, label: `Supplier address for ${project.name}` })
+    }
+    if (!supplier.supplier_phone.trim()) {
+      missingItems.push({ targetId: `supplier-phone-${project.id}`, label: `Supplier phone for ${project.name}` })
+    }
+    if (!proformaFiles[project.id] && !existingProformas[project.id]) {
+      missingItems.push({ targetId: `proforma-${project.id}`, label: `Proforma for ${project.name}` })
+    }
+  }
+  if (!form.supplier_payment_method) {
+    missingItems.push({ targetId: 'payment-method', label: 'Payment method' })
+  } else {
+    if (!(primaryAccount?.account_number ?? '').trim()) {
+      missingItems.push({ targetId: 'account-number-0', label: 'Account number' })
+    }
+    if (form.supplier_payment_method === 'bank' && !(primaryAccount?.bank_name ?? '').trim()) {
+      missingItems.push({ targetId: 'bank-name-0', label: 'Bank name' })
+    }
+  }
+
   const badItem = filledItems.find((r) => !r.name.trim() || !(Number(r.quantity) > 0) || !(Number(r.unit_price) > 0))
   const projectError = loadingProjects
     ? 'Projects are still loading. Please wait a moment.'
@@ -426,6 +494,22 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     }
     setShowErrors(false)
     setStep(target)
+  }
+
+  /** Jump from the Review banner to a missing field on step 3: navigate, scroll it into view, then focus or highlight it */
+  function goToMissing(targetId: string) {
+    setShowErrors(true) // keep existing error styling consistent
+    setStep(3)
+    setHighlightId(targetId)
+    if (scrollTimerRef.current != null) window.clearTimeout(scrollTimerRef.current)
+    if (highlightTimerRef.current != null) window.clearTimeout(highlightTimerRef.current)
+    // Deferred so step 3 mounts first (steps render conditionally)
+    scrollTimerRef.current = window.setTimeout(() => {
+      const el = document.getElementById(targetId)
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      el?.focus({ preventScroll: true })
+    }, 60)
+    highlightTimerRef.current = window.setTimeout(() => setHighlightId(null), 2000)
   }
 
   async function save(submitAfter: boolean) {
@@ -907,15 +991,18 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Field label="Supplier name">
-                    <input
+                    <SupplierNameField
+                      id={`supplier-name-${project.id}`}
                       value={supplier.supplier_name}
-                      onChange={(e) => updateSupplier(project.id, 'supplier_name', e.target.value)}
+                      onChange={(value) => updateSupplier(project.id, 'supplier_name', value)}
+                      onSelect={(suggestion) => applySupplierSuggestion(project.id, suggestion)}
                       placeholder="Supplier or company name"
-                      className={clsx(inputClass, 'border-transparent')}
+                      aria-label={`Supplier name for ${project.name}`}
                     />
                   </Field>
                   <Field label="Supplier address">
                     <input
+                      id={`supplier-address-${project.id}`}
                       value={supplier.supplier_address}
                       onChange={(e) => updateSupplier(project.id, 'supplier_address', e.target.value)}
                       placeholder="City, site, or address"
@@ -924,6 +1011,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                   </Field>
                   <Field label="Supplier contact phone">
                     <input
+                      id={`supplier-phone-${project.id}`}
                       type="tel"
                       value={supplier.supplier_phone}
                       onChange={(e) => updateSupplier(project.id, 'supplier_phone', e.target.value)}
@@ -939,6 +1027,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 )}
                 <Field label={`Proforma for ${project.name}`}>
                   <DropZone
+                    id={`proforma-${project.id}`}
+                    highlighted={highlightId === `proforma-${project.id}`}
                     file={proformaFiles[project.id] ?? null}
                     onFile={(file) => {
                       setTouched(true)
@@ -950,7 +1040,15 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             )
           })}
           <Field label="Payment accounts">
-            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Payment method">
+            <div
+              id="payment-method"
+              role="group"
+              aria-label="Payment method"
+              className={clsx(
+                'grid grid-cols-2 gap-2 rounded-2xl transition-shadow',
+                highlightId === 'payment-method' && 'ring-2 ring-[var(--accent)]',
+              )}
+            >
               {(Object.keys(PAYMENT_METHOD_LABELS) as SupplierPaymentMethod[]).map((method) => {
                 const active = form.supplier_payment_method === method
                 return (
@@ -980,6 +1078,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             {form.supplier_payment_method === 'telebirr' && (
               <div className="mt-3 space-y-2">
                 <input
+                  id="account-number-0"
                   value={form.payment_accounts[0]?.account_number ?? ''}
                   onChange={(e) => updateAccount(0, { account_number: e.target.value, bank_name: '', account_holder_name: form.payment_accounts[0]?.account_holder_name ?? '' })}
                   inputMode="numeric"
@@ -1016,6 +1115,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                     </div>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <input
+                        id={`bank-name-${index}`}
                         value={account.bank_name}
                         onChange={(e) => updateAccount(index, { bank_name: e.target.value })}
                         placeholder="Bank name, e.g. CBE"
@@ -1023,6 +1123,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                         className={clsx(inputClass, 'border-transparent')}
                       />
                       <input
+                        id={`account-number-${index}`}
                         value={account.account_number}
                         onChange={(e) => updateAccount(index, { account_number: e.target.value })}
                         inputMode="numeric"
@@ -1139,16 +1240,25 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
           )}
 
           {!hasSupplierDetails || !hasPaymentDetails || !hasProformas ? (
-            <div className="flex items-center gap-3 rounded-[1.5rem] bg-[var(--accent-soft)] p-4 text-sm text-[var(--ink)]">
+            <div className="flex items-start gap-3 rounded-[1.5rem] bg-[var(--accent-soft)] p-4 text-sm text-[var(--ink)]">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[var(--accent)]">
                 <Info size={16} />
               </span>
-              <span>
-                Complete each project's supplier, contact, payment details, and upload its Proforma to submit.{' '}
-                <button type="button" onClick={() => setStep(3)} className="font-semibold underline underline-offset-2">
-                  Complete supplier details
-                </button>{' '}
-                or save this as a draft for now.
+              <span className="min-w-0">
+                Complete the following to submit:
+                <span className="mt-1.5 flex flex-col items-start gap-1">
+                  {missingItems.map((item) => (
+                    <button
+                      key={item.targetId}
+                      type="button"
+                      onClick={() => goToMissing(item.targetId)}
+                      className="focus-ring rounded text-left font-semibold underline underline-offset-2"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </span>
+                <span className="mt-1.5 block">or save this as a draft for now.</span>
               </span>
             </div>
           ) : (
@@ -1170,7 +1280,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   )
 }
 
-function DropZone({ file, onFile }: { file: File | null; onFile: (file: File | null) => void }) {
+function DropZone({ id, highlighted = false, file, onFile }: { id?: string; highlighted?: boolean; file: File | null; onFile: (file: File | null) => void }) {
   const [over, setOver] = useState(false)
 
   function pick(next: File | null | undefined) {
@@ -1203,6 +1313,8 @@ function DropZone({ file, onFile }: { file: File | null; onFile: (file: File | n
 
   return (
     <label
+      id={id}
+      tabIndex={-1}
       onDragOver={(e) => {
         e.preventDefault()
         setOver(true)
@@ -1216,6 +1328,7 @@ function DropZone({ file, onFile }: { file: File | null; onFile: (file: File | n
       className={clsx(
         'mt-2 flex cursor-pointer items-center justify-center gap-2 rounded-2xl border-2 border-dashed px-4 py-4 text-center text-sm transition-colors',
         over ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]' : 'border-black/10 text-slate-500 hover:border-black/25',
+        highlighted && 'ring-2 ring-[var(--accent)]',
       )}
     >
       <Upload size={16} className="shrink-0" />

@@ -1,0 +1,39 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1. Implement itemized missing-item banner with click-through navigation": [
+      {
+        "executionId": "b7e0ae1f-e195-4154-8a7a-0dc1cffd77b5",
+        "chatSessionId": "sess_604a538e-8bbe-4c94-a02e-804acf265aea",
+        "timestamp": 1795213257433
+      },
+      {
+        "executionId": "b7e0ae1f-e195-4154-8a7a-0dc1cffd77b5",
+        "chatSessionId": "sess_604a538e-8bbe-4c94-a02e-804acf265aea",
+        "timestamp": 1795213263548
+      },
+      {
+        "executionId": "b7e0ae1f-e195-4154-8a7a-0dc1cffd77b5",
+        "chatSessionId": "sess_604a538e-8bbe-4c94-a02e-804acf265aea",
+        "timestamp": 1795213923159
+      }
+    ],
+    "2. Verification": [
+      {
+        "executionId": "b7e0ae1f-e195-4154-8a7a-0dc1cffd77b5",
+        "chatSessionId": "sess_604a538e-8bbe-4c94-a02e-804acf265aea",
+        "timestamp": 1795213257560
+      },
+      {
+        "executionId": "b7e0ae1f-e195-4154-8a7a-0dc1cffd77b5",
+        "chatSessionId": "sess_604a538e-8bbe-4c94-a02e-804acf265aea",
+        "timestamp": 1795213942596
+      },
+      {
+        "executionId": "b7e0ae1f-e195-4154-8a7a-0dc1cffd77b5",
+        "chatSessionId": "sess_604a538e-8bbe-4c94-a02e-804acf265aea",
+        "timestamp": 1795214429224
+      }
+    ]
+  }
+}

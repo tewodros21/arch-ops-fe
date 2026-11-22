@@ -1,6 +1,6 @@
 import { backend, type ItemInput, type ItemReceiptInput, type PurchaseCountFilter, type QuotationInput, type RequestInput } from '@/api'
 import { attachFile } from '@/lib/storage'
-import type { Department, PurchaseDuplicate, PurchaseRequest, Vendor } from '@/types'
+import type { Department, PurchaseDuplicate, PurchaseRequest, SupplierSuggestion, Vendor } from '@/types'
 
 export type { ItemInput, QuotationInput, RequestInput } from '@/api'
 
@@ -61,6 +61,13 @@ export function fetchProjects(activeOnly = true) {
 export async function fetchActiveVendors(): Promise<Vendor[]> {
   const { data, error } = await backend.vendors.list({ activeOnly: true })
   if (error) console.error('Error fetching vendors:', error)
+  return data ?? []
+}
+
+/** Autocomplete aid only: failures are silent (logged) and yield no suggestions */
+export async function fetchSupplierSuggestions(query: string): Promise<SupplierSuggestion[]> {
+  const { data, error } = await backend.purchases.supplierSuggestions(query)
+  if (error) console.error('Error fetching supplier suggestions:', error)
   return data ?? []
 }
 
