@@ -8,6 +8,7 @@ import type {
   PurchaseDuplicate,
   PurchaseRequest,
   SiteEmployee,
+  SupplierSuggestion,
   Vendor,
 } from '@/types'
 import { getRefreshToken, hasSession, http, list, onSessionChange, request, setSession, setTokens, type Page } from './http'
@@ -132,6 +133,11 @@ export const djangoBackend: Backend = {
         items,
         ...(excludeRequestId ? { exclude_request_id: excludeRequestId } : {}),
       })
+      return error || !data ? { data: null, error } : { data, error: null }
+    },
+
+    async supplierSuggestions(query) {
+      const { data, error } = await http.get<SupplierSuggestion[]>('/purchase-requests/supplier-suggestions/', { q: query })
       return error || !data ? { data: null, error } : { data, error: null }
     },
 
