@@ -153,6 +153,8 @@ export interface PurchaseProjectSupplier {
   payment_method?: SupplierPaymentMethod | ''
   bank_name?: string
   account_number?: string
+  /** Every account for this project's supplier (Finance, Admin and the requester only) */
+  payment_accounts?: SupplierPaymentAccount[]
 }
 
 export interface PurchaseDuplicate {

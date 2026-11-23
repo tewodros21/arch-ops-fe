@@ -74,6 +74,7 @@ export interface RequestInput {
     payment_method: SupplierPaymentMethod | ''
     bank_name: string
     account_number: string
+    payment_accounts: SupplierPaymentAccountInput[]
   }[]
   justification: string
   required_date: string | null
