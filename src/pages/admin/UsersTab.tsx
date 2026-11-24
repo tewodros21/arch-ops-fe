@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Pencil, Plus, Power, Search, Trash2, UserCog, UserPlus, Users } from 'lucide-react'
-import { Avatar, useConfirm } from '@/components/ui'
+import { Avatar, CustomSelect, useConfirm } from '@/components/ui'
 import { Field, FormModal } from '@/components/admin/FormModal'
 import { ProjectAssignmentField } from '@/components/admin/UserFormModal'
 import { NEW_USER_SEARCH, USER_CREATED_EVENT } from '@/constants'
@@ -13,6 +13,13 @@ import { ROLE_LABELS, type Department, type Profile, type Project, type Role } f
 import { EmptyCard, ListCard } from './shared'
 
 const ROLES = Object.keys(ROLE_LABELS) as Role[]
+type StatusFilter = 'active' | 'inactive' | 'all'
+
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'active', label: 'Active users' },
+  { value: 'inactive', label: 'Inactive users' },
+  { value: 'all', label: 'All members' },
+]
 
 export function UsersTab() {
   const { profile: me } = useAuth()
@@ -22,6 +29,7 @@ export function UsersTab() {
   const [loading, setLoading] = useState(true)
   const [updatingIds, setUpdatingIds] = useState<string[]>([])
   const [role, setRole] = useState<Role | null>(null)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('active')
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState<Profile | null>(null)
 
@@ -44,6 +52,7 @@ export function UsersTab() {
   const filtered = people.filter(
     (p) =>
       (!role || p.role === role) &&
+      (statusFilter === 'all' || (statusFilter === 'active' ? p.is_active : !p.is_active)) &&
       (!q || p.full_name.toLowerCase().includes(q) || p.email.toLowerCase().includes(q) || (p.department ?? '').toLowerCase().includes(q)),
   )
 
@@ -118,6 +127,14 @@ export function UsersTab() {
           <Search size={16} className="shrink-0 text-slate-400" />
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search name, email, department" className="min-w-0 flex-1 bg-transparent outline-none" />
         </label>
+        <CustomSelect<StatusFilter>
+          ariaLabel="Filter users by status"
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={STATUS_OPTIONS}
+          className="shrink-0 sm:w-44"
+          buttonClassName="!h-11 !py-0 !rounded-2xl border-transparent"
+        />
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 lg:mx-0 lg:px-0 lg:pb-0">
           <button className="chip focus-ring" aria-pressed={role === null} onClick={() => setRole(null)}>
             All <span className="text-xs opacity-60">{people.length}</span>
@@ -300,19 +317,25 @@ function EditPersonModal({ person, departments, onClose, onSaved }: { person: Pr
       </Field>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label="Role" htmlFor="p-role">
-          <select id="p-role" value={role} onChange={(e) => setRole(e.target.value as Role)} className="field">
-            {ROLES.map((r) => (
-              <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-            ))}
-          </select>
+          <CustomSelect<Role>
+            id="p-role"
+            value={role}
+            onChange={setRole}
+            options={ROLES.map((r) => ({ value: r, label: ROLE_LABELS[r] }))}
+            buttonClassName="!h-12 !rounded-2xl border-transparent"
+          />
         </Field>
         <Field label="Department" htmlFor="p-dept">
-          <select id="p-dept" value={department} onChange={(e) => setDepartment(e.target.value)} className="field">
-            <option value="">No department</option>
-            {options.map((d) => (
-              <option key={d.id} value={d.name}>{d.name}</option>
-            ))}
-          </select>
+          <CustomSelect<string>
+            id="p-dept"
+            value={department}
+            onChange={setDepartment}
+            options={[
+              { value: '', label: 'No department' },
+              ...options.map((d) => ({ value: d.name, label: d.name })),
+            ]}
+            buttonClassName="!h-12 !rounded-2xl border-transparent"
+          />
         </Field>
       </div>
       <ProjectAssignmentField

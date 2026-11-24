@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
-import { ArrowRight, Building2, CalendarDays, Check, FileText, Info, Package, Pencil, Plus, ReceiptText, Trash2, Upload, X } from 'lucide-react'
+import { ArrowRight, Building2, CalendarDays, Check, FileText, Info, Layers, Package, Pencil, Plus, ReceiptText, Trash2, Upload, X } from 'lucide-react'
 import { notify } from '@/lib/notify'
 import { ACCEPT_ATTR, attachFile, formatBytes, validateFile } from '@/lib/storage'
 import { EDITABLE_STATUSES, submitRequest } from '@/lib/workflow'
@@ -39,6 +39,14 @@ interface SupplierFields {
   payment_method: SupplierPaymentMethod | ''
   bank_name: string
   account_number: string
+  payment_accounts: SupplierPaymentAccount[]
+}
+
+const EMPTY_ACCOUNT: SupplierPaymentAccount = {
+  bank_name: '',
+  account_number: '',
+  account_holder_name: '',
+  phone_number: '',
 }
 
 const EMPTY_SUPPLIER: SupplierFields = {
@@ -48,15 +56,10 @@ const EMPTY_SUPPLIER: SupplierFields = {
   payment_method: '',
   bank_name: '',
   account_number: '',
+  payment_accounts: [{ ...EMPTY_ACCOUNT }],
 }
 
 const EMPTY_ITEM: ItemRow = { project_id: '', name: '', quantity: '1', unit: 'unit', unit_price: '', description: '' }
-const EMPTY_ACCOUNT: SupplierPaymentAccount = {
-  bank_name: '',
-  account_number: '',
-  account_holder_name: '',
-  phone_number: '',
-}
 const UNITS = [
   'unit', 'each', 'pcs', 'pair', 'pack', 'set', 'box', 'bag', 'sack', 'bucket', 'drum',
   'm', 'cm', 'mm', 'm²', 'm³', 'ft', 'roll', 'sheet', 'board', 'length', 'bundle', 'pallet', 'load',
@@ -106,6 +109,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   const [items, setItems] = useState<ItemRow[]>([{ ...EMPTY_ITEM }])
   const [proformaFiles, setProformaFiles] = useState<Record<string, File | null>>({})
   const [existingProformas, setExistingProformas] = useState<Record<string, string>>({})
+  const [splitSuppliers, setSplitSuppliers] = useState(false)
   const [form, setForm] = useState({
     title: '',
     description: '',
@@ -220,6 +224,16 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
         project_ids: r.project_ids?.length ? r.project_ids : [r.project_id],
         department: r.department ?? profile.department ?? 'General',
         suppliers: (r.project_suppliers ?? []).reduce<Record<string, SupplierFields>>((all, supplier) => {
+          const supplierAccounts = supplier.payment_accounts?.length
+            ? supplier.payment_accounts
+            : supplier.account_number || supplier.bank_name
+              ? [{
+                  bank_name: supplier.bank_name ?? '',
+                  account_number: supplier.account_number ?? '',
+                  account_holder_name: supplier.account_holder_name ?? '',
+                  phone_number: supplier.phone_number ?? '',
+                }]
+              : [{ ...EMPTY_ACCOUNT }]
           all[supplier.project_id] = {
             supplier_name: supplier.supplier_name ?? '',
             supplier_address: supplier.supplier_address ?? '',
@@ -227,6 +241,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             payment_method: supplier.payment_method ?? '',
             bank_name: supplier.bank_name ?? '',
             account_number: supplier.account_number ?? '',
+            payment_accounts: supplierAccounts,
           }
           return all
         }, {
@@ -237,6 +252,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             payment_method: r.supplier_payment_method ?? '',
             bank_name: r.supplier_bank_name ?? '',
             account_number: r.supplier_account_number ?? '',
+            payment_accounts: savedAccounts.length ? savedAccounts : [{ ...EMPTY_ACCOUNT }],
           },
         }),
         supplier_payment_method: r.supplier_payment_method ?? r.project_suppliers?.[0]?.payment_method ?? '',
@@ -279,6 +295,19 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
           }
         }
       }
+      const savedProjectSuppliers = r.project_suppliers ?? []
+      if (savedProjectSuppliers.length > 1) {
+        const first = savedProjectSuppliers[0]
+        const hasDifferences = savedProjectSuppliers.slice(1).some(
+          (s) =>
+            (s.supplier_name ?? '') !== (first.supplier_name ?? '') ||
+            (s.supplier_address ?? '') !== (first.supplier_address ?? '') ||
+            (s.supplier_phone ?? '') !== (first.supplier_phone ?? ''),
+        )
+        if (hasDifferences) {
+          setSplitSuppliers(true)
+        }
+      }
       setExistingProformas(proformas)
       setLoadingEdit(false)
     })
@@ -295,42 +324,174 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     setItems((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)))
   }
 
-  function updateSupplier(projectId: string, key: keyof SupplierFields, value: string) {
-    setTouched(true)
-    setForm((f) => ({
-      ...f,
-      suppliers: {
-        ...f.suppliers,
-        [projectId]: { ...(f.suppliers[projectId] ?? EMPTY_SUPPLIER), [key]: value },
-      },
-    }))
-  }
-
-  /** Apply a picked suggestion: name/address/phone go to that project's block only;
-   * payment method/accounts are request-level, so they replace the shared set. */
-  function applySupplierSuggestion(projectId: string, suggestion: SupplierSuggestion) {
-    updateSupplier(projectId, 'supplier_name', suggestion.supplier_name)
-    updateSupplier(projectId, 'supplier_address', suggestion.supplier_address)
-    updateSupplier(projectId, 'supplier_phone', suggestion.supplier_phone)
+  function updateSupplier(projectId: string, key: keyof SupplierFields, value: any) {
     setTouched(true)
     setForm((f) => {
-      const method = suggestion.payment_method || f.supplier_payment_method
-      if (suggestion.payment_accounts.length === 0) {
-        return { ...f, supplier_payment_method: method }
+      if (!splitSuppliers && f.project_ids.length > 1) {
+        // Keep all selected projects synced to the single supplier form
+        const nextSuppliers = { ...f.suppliers }
+        for (const pid of f.project_ids) {
+          nextSuppliers[pid] = { ...(nextSuppliers[pid] ?? EMPTY_SUPPLIER), [key]: value }
+        }
+        return {
+          ...f,
+          suppliers: nextSuppliers,
+          ...(key === 'payment_method' ? { supplier_payment_method: value } : {}),
+          ...(key === 'payment_accounts' ? { payment_accounts: value } : {}),
+        }
       }
-      const accounts = suggestion.payment_accounts.map((account) => ({
-        bank_name: account.bank_name ?? '',
-        account_number: account.account_number ?? '',
-        account_holder_name: account.account_holder_name ?? '',
-        phone_number: account.phone_number ?? '',
-      }))
       return {
         ...f,
-        supplier_payment_method: method,
-        // Same rule as the payment-method toggle and save: telebirr keeps one account
-        payment_accounts: method === 'telebirr' ? accounts.slice(0, 1) : accounts,
+        suppliers: {
+          ...f.suppliers,
+          [projectId]: { ...(f.suppliers[projectId] ?? EMPTY_SUPPLIER), [key]: value },
+        },
+        ...(projectId === f.project_ids[0]
+          ? {
+              ...(key === 'payment_method' ? { supplier_payment_method: value } : {}),
+              ...(key === 'payment_accounts' ? { payment_accounts: value } : {}),
+            }
+          : {}),
       }
     })
+  }
+
+  function updateSupplierAccount(projectId: string, index: number, patch: Partial<SupplierPaymentAccount>) {
+    setTouched(true)
+    setForm((f) => {
+      if (!splitSuppliers && f.project_ids.length > 1) {
+        const nextSuppliers = { ...f.suppliers }
+        const currentAccounts = f.suppliers[projectId]?.payment_accounts ?? [{ ...EMPTY_ACCOUNT }]
+        const nextAccounts = currentAccounts.map((account, i) => (i === index ? { ...account, ...patch } : account))
+        for (const pid of f.project_ids) {
+          nextSuppliers[pid] = { ...(nextSuppliers[pid] ?? EMPTY_SUPPLIER), payment_accounts: nextAccounts }
+        }
+        return { ...f, suppliers: nextSuppliers, payment_accounts: nextAccounts }
+      }
+      const supplier = f.suppliers[projectId] ?? EMPTY_SUPPLIER
+      const currentAccounts = supplier.payment_accounts?.length ? supplier.payment_accounts : [{ ...EMPTY_ACCOUNT }]
+      const nextAccounts = currentAccounts.map((account, i) => (i === index ? { ...account, ...patch } : account))
+      return {
+        ...f,
+        suppliers: {
+          ...f.suppliers,
+          [projectId]: { ...supplier, payment_accounts: nextAccounts },
+        },
+        ...(projectId === f.project_ids[0] ? { payment_accounts: nextAccounts } : {}),
+      }
+    })
+  }
+
+  function addSupplierAccount(projectId: string) {
+    setTouched(true)
+    setForm((f) => {
+      if (!splitSuppliers && f.project_ids.length > 1) {
+        const nextSuppliers = { ...f.suppliers }
+        const currentAccounts = f.suppliers[projectId]?.payment_accounts ?? [{ ...EMPTY_ACCOUNT }]
+        const nextAccounts = [...currentAccounts, { ...EMPTY_ACCOUNT }]
+        for (const pid of f.project_ids) {
+          nextSuppliers[pid] = { ...(nextSuppliers[pid] ?? EMPTY_SUPPLIER), payment_accounts: nextAccounts }
+        }
+        return { ...f, suppliers: nextSuppliers, payment_accounts: nextAccounts }
+      }
+      const supplier = f.suppliers[projectId] ?? EMPTY_SUPPLIER
+      const currentAccounts = supplier.payment_accounts?.length ? supplier.payment_accounts : [{ ...EMPTY_ACCOUNT }]
+      const nextAccounts = [...currentAccounts, { ...EMPTY_ACCOUNT }]
+      return {
+        ...f,
+        suppliers: {
+          ...f.suppliers,
+          [projectId]: { ...supplier, payment_accounts: nextAccounts },
+        },
+        ...(projectId === f.project_ids[0] ? { payment_accounts: nextAccounts } : {}),
+      }
+    })
+  }
+
+  function removeSupplierAccount(projectId: string, index: number) {
+    setTouched(true)
+    setForm((f) => {
+      if (!splitSuppliers && f.project_ids.length > 1) {
+        const nextSuppliers = { ...f.suppliers }
+        const currentAccounts = f.suppliers[projectId]?.payment_accounts ?? [{ ...EMPTY_ACCOUNT }]
+        const nextAccounts = currentAccounts.length <= 1 ? [{ ...EMPTY_ACCOUNT }] : currentAccounts.filter((_, i) => i !== index)
+        for (const pid of f.project_ids) {
+          nextSuppliers[pid] = { ...(nextSuppliers[pid] ?? EMPTY_SUPPLIER), payment_accounts: nextAccounts }
+        }
+        return { ...f, suppliers: nextSuppliers, payment_accounts: nextAccounts }
+      }
+      const supplier = f.suppliers[projectId] ?? EMPTY_SUPPLIER
+      const currentAccounts = supplier.payment_accounts?.length ? supplier.payment_accounts : [{ ...EMPTY_ACCOUNT }]
+      const nextAccounts = currentAccounts.length <= 1 ? [{ ...EMPTY_ACCOUNT }] : currentAccounts.filter((_, i) => i !== index)
+      return {
+        ...f,
+        suppliers: {
+          ...f.suppliers,
+          [projectId]: { ...supplier, payment_accounts: nextAccounts },
+        },
+        ...(projectId === f.project_ids[0] ? { payment_accounts: nextAccounts } : {}),
+      }
+    })
+  }
+
+  /** Apply a picked suggestion: name/address/phone and payment details go to that project's block (or synced across projects if single supplier) */
+  function applySupplierSuggestion(projectId: string, suggestion: SupplierSuggestion) {
+    setTouched(true)
+    const accounts = suggestion.payment_accounts.length > 0
+      ? suggestion.payment_accounts.map((account) => ({
+          bank_name: account.bank_name ?? '',
+          account_number: account.account_number ?? '',
+          account_holder_name: account.account_holder_name ?? '',
+          phone_number: account.phone_number ?? '',
+        }))
+      : [{ ...EMPTY_ACCOUNT }]
+
+    const method = suggestion.payment_method || ''
+    const finalAccounts = method === 'telebirr' ? accounts.slice(0, 1) : accounts
+
+    if (!splitSuppliers && form.project_ids.length > 1) {
+      setForm((f) => {
+        const nextSuppliers = { ...f.suppliers }
+        for (const pid of f.project_ids) {
+          nextSuppliers[pid] = {
+            ...(nextSuppliers[pid] ?? EMPTY_SUPPLIER),
+            supplier_name: suggestion.supplier_name,
+            supplier_address: suggestion.supplier_address,
+            supplier_phone: suggestion.supplier_phone,
+            ...(method ? { payment_method: method } : {}),
+            ...(suggestion.payment_accounts.length > 0 ? { payment_accounts: finalAccounts } : {}),
+          }
+        }
+        return {
+          ...f,
+          suppliers: nextSuppliers,
+          ...(method ? { supplier_payment_method: method } : {}),
+          ...(suggestion.payment_accounts.length > 0 ? { payment_accounts: finalAccounts } : {}),
+        }
+      })
+    } else {
+      setForm((f) => {
+        const currentSupplier = f.suppliers[projectId] ?? EMPTY_SUPPLIER
+        const updatedSupplier: SupplierFields = {
+          ...currentSupplier,
+          supplier_name: suggestion.supplier_name,
+          supplier_address: suggestion.supplier_address,
+          supplier_phone: suggestion.supplier_phone,
+          ...(method ? { payment_method: method } : {}),
+          ...(suggestion.payment_accounts.length > 0 ? { payment_accounts: finalAccounts } : {}),
+        }
+        return {
+          ...f,
+          suppliers: { ...f.suppliers, [projectId]: updatedSupplier },
+          ...(projectId === f.project_ids[0]
+            ? {
+                ...(method ? { supplier_payment_method: method } : {}),
+                ...(suggestion.payment_accounts.length > 0 ? { payment_accounts: finalAccounts } : {}),
+              }
+            : {}),
+        }
+      })
+    }
   }
 
   function toggleProject(id: string) {
@@ -345,27 +506,6 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   function addItem(projectId: string) {
     setTouched(true)
     setItems((rows) => [...rows, { ...EMPTY_ITEM, project_id: projectId }])
-  }
-
-  function updateAccount(index: number, patch: Partial<SupplierPaymentAccount>) {
-    setTouched(true)
-    setForm((f) => ({
-      ...f,
-      payment_accounts: f.payment_accounts.map((account, i) => (i === index ? { ...account, ...patch } : account)),
-    }))
-  }
-
-  function addAccount() {
-    setTouched(true)
-    setForm((f) => ({ ...f, payment_accounts: [...f.payment_accounts, { ...EMPTY_ACCOUNT }] }))
-  }
-
-  function removeAccount(index: number) {
-    setTouched(true)
-    setForm((f) => ({
-      ...f,
-      payment_accounts: f.payment_accounts.length <= 1 ? [{ ...EMPTY_ACCOUNT }] : f.payment_accounts.filter((_, i) => i !== index),
-    }))
   }
 
   const selectedProjects = form.project_ids
@@ -390,31 +530,75 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       account.phone_number.trim(),
   )
   const primaryAccount = filledAccounts[0]
-  const hasPaymentDetails = !!(
-    form.supplier_payment_method
-    && primaryAccount?.account_number.trim()
-    && (form.supplier_payment_method !== 'bank' || primaryAccount.bank_name.trim())
-  )
-  const paymentError = (() => {
-    if (form.supplier_payment_method === 'telebirr') {
-      const digits = (primaryAccount?.account_number ?? '').replace(/\D/g, '')
-      if (primaryAccount?.account_number.trim() && !/^[\d\s+-]+$/.test(primaryAccount.account_number.trim())) {
-        return 'Use digits only for the Telebirr number'
+
+  function getProjectAccounts(projectId: string) {
+    const supplier = form.suppliers[projectId]
+    const list = supplier?.payment_accounts?.length ? supplier.payment_accounts : form.payment_accounts
+    return list.filter(
+      (account) =>
+        account.bank_name.trim() ||
+        account.account_number.trim() ||
+        account.account_holder_name.trim() ||
+        account.phone_number.trim(),
+    )
+  }
+
+  function getProjectPaymentMethod(projectId: string): SupplierPaymentMethod | '' {
+    return form.suppliers[projectId]?.payment_method || form.supplier_payment_method
+  }
+
+  const hasPaymentDetails = multiProject && splitSuppliers
+    ? selectedProjects.every((p) => {
+        const method = getProjectPaymentMethod(p.id)
+        const accounts = getProjectAccounts(p.id)
+        return !!(
+          method &&
+          accounts[0]?.account_number.trim() &&
+          (method !== 'bank' || accounts[0]?.bank_name.trim())
+        )
+      })
+    : !!(
+        form.supplier_payment_method
+        && primaryAccount?.account_number.trim()
+        && (form.supplier_payment_method !== 'bank' || primaryAccount.bank_name.trim())
+      )
+
+  function validatePaymentFor(method: SupplierPaymentMethod | '', accounts: SupplierPaymentAccount[], projectLabel?: string) {
+    const prefix = projectLabel ? `${projectLabel}: ` : ''
+    if (method === 'telebirr') {
+      const first = accounts[0]
+      const digits = (first?.account_number ?? '').replace(/\D/g, '')
+      if (first?.account_number.trim() && !/^[\d\s+-]+$/.test(first.account_number.trim())) {
+        return `${prefix}Use digits only for the Telebirr number`
       }
       if (digits && (digits.length < 9 || digits.length > 12)) {
-        return 'Enter a valid Telebirr phone number, e.g. 0912345678'
+        return `${prefix}Enter a valid Telebirr phone number, e.g. 0912345678`
       }
       return null
     }
-    for (const [index, account] of form.payment_accounts.entries()) {
+    for (const [index, account] of accounts.entries()) {
       if (account.account_number.trim() && !/^[\d\s+-]+$/.test(account.account_number.trim())) {
-        return `Account ${index + 1}: use digits only for the account number`
+        return `${prefix}Account ${index + 1}: use digits only for the account number`
       }
       if (account.phone_number.trim() && !/^[\d\s+-]+$/.test(account.phone_number.trim())) {
-        return `Account ${index + 1}: use digits only for the phone number`
+        return `${prefix}Account ${index + 1}: use digits only for the phone number`
       }
     }
     return null
+  }
+
+  const paymentError = (() => {
+    if (multiProject && splitSuppliers) {
+      for (const project of selectedProjects) {
+        const method = getProjectPaymentMethod(project.id)
+        const supplier = form.suppliers[project.id]
+        const accounts = supplier?.payment_accounts?.length ? supplier.payment_accounts : form.payment_accounts
+        const err = validatePaymentFor(method, accounts, project.name)
+        if (err) return err
+      }
+      return null
+    }
+    return validatePaymentFor(form.supplier_payment_method, form.payment_accounts)
   })()
   const hasProformas = selectedProjects.length > 0 && selectedProjects.every((project) =>
     !!(proformaFiles[project.id] || existingProformas[project.id]),
@@ -423,29 +607,61 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
   /** One entry per concrete gap blocking submission; drives the Review-step banner links */
   interface MissingItem { targetId: string; label: string }
   const missingItems: MissingItem[] = []
-  for (const project of selectedProjects) {
-    const supplier = form.suppliers[project.id] ?? EMPTY_SUPPLIER
+  if (multiProject && !splitSuppliers) {
+    const primaryId = form.project_ids[0]
+    const supplier = form.suppliers[primaryId] ?? EMPTY_SUPPLIER
     if (!supplier.supplier_name.trim()) {
-      missingItems.push({ targetId: `supplier-name-${project.id}`, label: `Supplier name for ${project.name}` })
+      missingItems.push({ targetId: `supplier-name-${primaryId}`, label: 'Supplier name' })
     }
     if (!supplier.supplier_address.trim()) {
-      missingItems.push({ targetId: `supplier-address-${project.id}`, label: `Supplier address for ${project.name}` })
+      missingItems.push({ targetId: `supplier-address-${primaryId}`, label: 'Supplier address' })
     }
     if (!supplier.supplier_phone.trim()) {
-      missingItems.push({ targetId: `supplier-phone-${project.id}`, label: `Supplier phone for ${project.name}` })
+      missingItems.push({ targetId: `supplier-phone-${primaryId}`, label: 'Supplier phone' })
     }
-    if (!proformaFiles[project.id] && !existingProformas[project.id]) {
-      missingItems.push({ targetId: `proforma-${project.id}`, label: `Proforma for ${project.name}` })
+    for (const project of selectedProjects) {
+      if (!proformaFiles[project.id] && !existingProformas[project.id]) {
+        missingItems.push({ targetId: `proforma-${project.id}`, label: `Proforma for ${project.name}` })
+      }
     }
-  }
-  if (!form.supplier_payment_method) {
-    missingItems.push({ targetId: 'payment-method', label: 'Payment method' })
+    if (!form.supplier_payment_method) {
+      missingItems.push({ targetId: 'payment-method', label: 'Payment method' })
+    } else {
+      if (!(primaryAccount?.account_number ?? '').trim()) {
+        missingItems.push({ targetId: 'account-number-0', label: 'Account number' })
+      }
+      if (form.supplier_payment_method === 'bank' && !(primaryAccount?.bank_name ?? '').trim()) {
+        missingItems.push({ targetId: 'bank-name-0', label: 'Bank name' })
+      }
+    }
   } else {
-    if (!(primaryAccount?.account_number ?? '').trim()) {
-      missingItems.push({ targetId: 'account-number-0', label: 'Account number' })
-    }
-    if (form.supplier_payment_method === 'bank' && !(primaryAccount?.bank_name ?? '').trim()) {
-      missingItems.push({ targetId: 'bank-name-0', label: 'Bank name' })
+    for (const project of selectedProjects) {
+      const supplier = form.suppliers[project.id] ?? EMPTY_SUPPLIER
+      if (!supplier.supplier_name.trim()) {
+        missingItems.push({ targetId: `supplier-name-${project.id}`, label: `Supplier name for ${project.name}` })
+      }
+      if (!supplier.supplier_address.trim()) {
+        missingItems.push({ targetId: `supplier-address-${project.id}`, label: `Supplier address for ${project.name}` })
+      }
+      if (!supplier.supplier_phone.trim()) {
+        missingItems.push({ targetId: `supplier-phone-${project.id}`, label: `Supplier phone for ${project.name}` })
+      }
+      if (!proformaFiles[project.id] && !existingProformas[project.id]) {
+        missingItems.push({ targetId: `proforma-${project.id}`, label: `Proforma for ${project.name}` })
+      }
+      const projectMethod = supplier.payment_method || form.supplier_payment_method
+      const projectAccounts = supplier.payment_accounts?.length ? supplier.payment_accounts : form.payment_accounts
+      const firstAcc = projectAccounts[0]
+      if (!projectMethod) {
+        missingItems.push({ targetId: `payment-method-${project.id}`, label: `Payment method for ${project.name}` })
+      } else {
+        if (!(firstAcc?.account_number ?? '').trim()) {
+          missingItems.push({ targetId: `account-number-${project.id}-0`, label: `Account number for ${project.name}` })
+        }
+        if (projectMethod === 'bank' && !(firstAcc?.bank_name ?? '').trim()) {
+          missingItems.push({ targetId: `bank-name-${project.id}-0`, label: `Bank name for ${project.name}` })
+        }
+      }
     }
   }
 
@@ -564,14 +780,26 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       supplier_payment_accounts: method === 'telebirr' ? accountsPayload.slice(0, 1) : accountsPayload,
       project_suppliers: form.project_ids.map((project_id) => {
         const supplier = form.suppliers[project_id] ?? EMPTY_SUPPLIER
+        const sAccounts = (supplier.payment_accounts?.length ? supplier.payment_accounts : form.payment_accounts).filter(
+          (acc) => acc.bank_name.trim() || acc.account_number.trim() || acc.account_holder_name.trim() || acc.phone_number.trim(),
+        )
+        const sMethod = supplier.payment_method || method
         return {
           project_id,
           supplier_name: supplier.supplier_name.trim(),
           supplier_address: supplier.supplier_address.trim(),
           supplier_phone: supplier.supplier_phone.trim(),
-          payment_method: method,
-          bank_name: method === 'bank' ? (accountsPayload[0]?.bank_name ?? '') : '',
-          account_number: accountsPayload[0]?.account_number ?? '',
+          payment_method: sMethod,
+          bank_name: sMethod === 'bank' ? (sAccounts[0]?.bank_name ?? '') : '',
+          account_number: sAccounts[0]?.account_number ?? '',
+          account_holder_name: sAccounts[0]?.account_holder_name ?? '',
+          phone_number: sAccounts[0]?.phone_number ?? '',
+          payment_accounts: sAccounts.map((account) => ({
+            bank_name: account.bank_name.trim(),
+            account_number: account.account_number.trim(),
+            account_holder_name: account.account_holder_name.trim(),
+            phone_number: account.phone_number.trim(),
+          })),
         }
       }),
       justification: form.justification.trim(),
@@ -976,192 +1204,453 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       {!loadingEdit && step === 3 && (
         <>
           <p className="text-sm text-[var(--ink-soft)]">
-            Enter supplier contact details and attach a Proforma for each selected project, then add payment accounts.
+            {multiProject && !splitSuppliers
+              ? 'Enter supplier contact details and attach Proforma documents for your purchase, then add payment accounts.'
+              : 'Enter supplier contact details, attach a Proforma, and add payment accounts for each project.'}
           </p>
-          {selectedProjects.map((project) => {
-            const supplier = form.suppliers[project.id] ?? EMPTY_SUPPLIER
-            return (
-              <section key={project.id} className="space-y-3 rounded-[1.5rem] border border-black/10 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-[var(--ink)]">
-                    <Building2 size={16} className="shrink-0 text-[var(--accent)]" />
-                    <span className="truncate">{project.name}</span>
+          {multiProject && !splitSuppliers ? (
+            (() => {
+              const primaryProjectId = form.project_ids[0]
+              const supplier = form.suppliers[primaryProjectId] ?? EMPTY_SUPPLIER
+              const currentAccounts = supplier.payment_accounts?.length ? supplier.payment_accounts : form.payment_accounts
+              const currentMethod = supplier.payment_method || form.supplier_payment_method
+              return (
+                <section className="space-y-4 rounded-[1.5rem] border border-black/10 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-[var(--ink)]">
+                      <Building2 size={16} className="shrink-0 text-[var(--accent)]" />
+                      <span className="truncate">Supplier for {selectedProjects.map((p) => p.name).join(' & ')}</span>
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold text-[var(--ink)]">{money(itemsTotal)}</span>
                   </div>
-                  <span className="shrink-0 text-sm font-semibold text-[var(--ink)]">{money(totalFor(project.id))}</span>
-                </div>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Supplier name">
-                    <SupplierNameField
-                      id={`supplier-name-${project.id}`}
-                      value={supplier.supplier_name}
-                      onChange={(value) => updateSupplier(project.id, 'supplier_name', value)}
-                      onSelect={(suggestion) => applySupplierSuggestion(project.id, suggestion)}
-                      placeholder="Supplier or company name"
-                      aria-label={`Supplier name for ${project.name}`}
-                    />
-                  </Field>
-                  <Field label="Supplier address">
-                    <input
-                      id={`supplier-address-${project.id}`}
-                      value={supplier.supplier_address}
-                      onChange={(e) => updateSupplier(project.id, 'supplier_address', e.target.value)}
-                      placeholder="City, site, or address"
-                      className={clsx(inputClass, 'border-transparent')}
-                    />
-                  </Field>
-                  <Field label="Supplier contact phone">
-                    <input
-                      id={`supplier-phone-${project.id}`}
-                      type="tel"
-                      value={supplier.supplier_phone}
-                      onChange={(e) => updateSupplier(project.id, 'supplier_phone', e.target.value)}
-                      placeholder="Supplier phone number"
-                      className={clsx(inputClass, 'border-transparent')}
-                    />
-                  </Field>
-                </div>
-                {existingProformas[project.id] && (
-                  <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
-                    Attached Proforma: <span className="font-semibold text-[var(--ink)]">{existingProformas[project.id]}</span>
-                  </p>
-                )}
-                <Field label={`Proforma for ${project.name}`}>
-                  <DropZone
-                    id={`proforma-${project.id}`}
-                    highlighted={highlightId === `proforma-${project.id}`}
-                    file={proformaFiles[project.id] ?? null}
-                    onFile={(file) => {
-                      setTouched(true)
-                      setProformaFiles((current) => ({ ...current, [project.id]: file }))
-                    }}
-                  />
-                </Field>
-              </section>
-            )
-          })}
-          <Field label="Payment accounts">
-            <div
-              id="payment-method"
-              role="group"
-              aria-label="Payment method"
-              className={clsx(
-                'grid grid-cols-2 gap-2 rounded-2xl transition-shadow',
-                highlightId === 'payment-method' && 'ring-2 ring-[var(--accent)]',
-              )}
-            >
-              {(Object.keys(PAYMENT_METHOD_LABELS) as SupplierPaymentMethod[]).map((method) => {
-                const active = form.supplier_payment_method === method
+
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Field label="Supplier or company name">
+                      <SupplierNameField
+                        id={`supplier-name-${primaryProjectId}`}
+                        value={supplier.supplier_name}
+                        onChange={(value) => updateSupplier(primaryProjectId, 'supplier_name', value)}
+                        onSelect={(suggestion) => applySupplierSuggestion(primaryProjectId, suggestion)}
+                        placeholder="Supplier or company name"
+                        aria-label="Supplier or company name"
+                      />
+                    </Field>
+                    <Field label="Supplier address">
+                      <input
+                        id={`supplier-address-${primaryProjectId}`}
+                        value={supplier.supplier_address}
+                        onChange={(e) => updateSupplier(primaryProjectId, 'supplier_address', e.target.value)}
+                        placeholder="City, site, or address"
+                        className={clsx(inputClass, 'border-transparent')}
+                      />
+                    </Field>
+                    <Field label="Supplier contact phone">
+                      <input
+                        id={`supplier-phone-${primaryProjectId}`}
+                        type="tel"
+                        value={supplier.supplier_phone}
+                        onChange={(e) => updateSupplier(primaryProjectId, 'supplier_phone', e.target.value)}
+                        placeholder="Supplier phone number"
+                        className={clsx(inputClass, 'border-transparent')}
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="space-y-3 border-t border-black/[0.06] pt-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Proforma Documents
+                    </p>
+                    {selectedProjects.map((project) => (
+                      <div key={project.id} className="space-y-1.5">
+                        {existingProformas[project.id] && (
+                          <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                            Attached Proforma ({project.name}):{' '}
+                            <span className="font-semibold text-[var(--ink)]">{existingProformas[project.id]}</span>
+                          </p>
+                        )}
+                        <Field label={`Proforma for ${project.name} (${money(totalFor(project.id))})`}>
+                          <DropZone
+                            id={`proforma-${project.id}`}
+                            highlighted={highlightId === `proforma-${project.id}`}
+                            file={proformaFiles[project.id] ?? null}
+                            onFile={(file) => {
+                              setTouched(true)
+                              setProformaFiles((current) => ({ ...current, [project.id]: file }))
+                            }}
+                          />
+                        </Field>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-3 border-t border-black/[0.06] pt-3">
+                    <Field label="Payment accounts">
+                      <div
+                        id="payment-method"
+                        role="group"
+                        aria-label="Payment method"
+                        className={clsx(
+                          'grid grid-cols-2 gap-2 rounded-2xl transition-shadow',
+                          highlightId === 'payment-method' && 'ring-2 ring-[var(--accent)]',
+                        )}
+                      >
+                        {(Object.keys(PAYMENT_METHOD_LABELS) as SupplierPaymentMethod[]).map((method) => {
+                          const active = currentMethod === method
+                          return (
+                            <button
+                              key={method}
+                              type="button"
+                              aria-pressed={active}
+                              onClick={() => {
+                                const newAccounts = active ? [{ ...EMPTY_ACCOUNT }] : method === 'telebirr' ? [currentAccounts[0] ?? { ...EMPTY_ACCOUNT }] : currentAccounts
+                                updateSupplier(primaryProjectId, 'payment_method', active ? '' : method)
+                                updateSupplier(primaryProjectId, 'payment_accounts', newAccounts)
+                              }}
+                              className={clsx(
+                                'focus-ring rounded-2xl border px-4 py-3 text-sm font-medium transition-colors',
+                                active ? 'border-[var(--ink)] bg-[var(--ink)] text-white' : 'border-black/10 text-[var(--ink)] hover:border-black/30',
+                              )}
+                            >
+                              {PAYMENT_METHOD_LABELS[method]}
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      {currentMethod === 'telebirr' && (
+                        <div className="mt-3 space-y-2">
+                          <input
+                            id="account-number-0"
+                            value={currentAccounts[0]?.account_number ?? ''}
+                            onChange={(e) =>
+                              updateSupplierAccount(primaryProjectId, 0, {
+                                account_number: e.target.value,
+                                bank_name: '',
+                                account_holder_name: currentAccounts[0]?.account_holder_name ?? '',
+                              })
+                            }
+                            inputMode="numeric"
+                            placeholder="Telebirr phone number, e.g. 0912345678"
+                            aria-label="Telebirr number"
+                            className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
+                          />
+                          <input
+                            value={currentAccounts[0]?.account_holder_name ?? ''}
+                            onChange={(e) => updateSupplierAccount(primaryProjectId, 0, { account_holder_name: e.target.value })}
+                            placeholder="Account holder name"
+                            aria-label="Account holder name"
+                            className={clsx(inputClass, 'border-transparent')}
+                          />
+                        </div>
+                      )}
+
+                      {(currentMethod === 'bank' || !currentMethod) && (
+                        <div className="mt-3 space-y-3">
+                          {currentAccounts.map((account, index) => (
+                            <div key={index} className="rounded-[1.25rem] border border-black/10 bg-white p-3">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <p className="text-sm font-semibold text-[var(--ink)]">Account {index + 1}</p>
+                                {currentAccounts.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() => removeSupplierAccount(primaryProjectId, index)}
+                                    aria-label={`Remove account ${index + 1}`}
+                                    className="focus-ring rounded-full p-1.5 text-slate-400 hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+                                  >
+                                    <Trash2 size={15} />
+                                  </button>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                <input
+                                  id={`bank-name-${index}`}
+                                  value={account.bank_name}
+                                  onChange={(e) => updateSupplierAccount(primaryProjectId, index, { bank_name: e.target.value })}
+                                  placeholder="Bank name, e.g. CBE"
+                                  aria-label={`Bank name for account ${index + 1}`}
+                                  className={clsx(inputClass, 'border-transparent')}
+                                />
+                                <input
+                                  id={`account-number-${index}`}
+                                  value={account.account_number}
+                                  onChange={(e) => updateSupplierAccount(primaryProjectId, index, { account_number: e.target.value })}
+                                  inputMode="numeric"
+                                  placeholder="Account number"
+                                  aria-label={`Account number ${index + 1}`}
+                                  className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
+                                />
+                                <input
+                                  value={account.account_holder_name}
+                                  onChange={(e) => updateSupplierAccount(primaryProjectId, index, { account_holder_name: e.target.value })}
+                                  placeholder="Account holder name"
+                                  aria-label={`Account holder name ${index + 1}`}
+                                  className={clsx(inputClass, 'border-transparent')}
+                                />
+                                <input
+                                  value={account.phone_number}
+                                  onChange={(e) => updateSupplierAccount(primaryProjectId, index, { phone_number: e.target.value })}
+                                  inputMode="tel"
+                                  placeholder="Phone number"
+                                  aria-label={`Phone number ${index + 1}`}
+                                  className={clsx(inputClass, 'border-transparent')}
+                                />
+                              </div>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => addSupplierAccount(primaryProjectId)}
+                            className="focus-ring flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-black/10 py-3 text-sm font-medium text-[var(--ink)] hover:border-black/30"
+                          >
+                            <Plus size={16} />
+                            Add another account
+                          </button>
+                        </div>
+                      )}
+                      {err(3, !!paymentError) && <p className="mt-2 text-xs font-medium text-[var(--accent)]">{paymentError}</p>}
+                      <p className="mt-2 text-xs text-slate-500">Only Finance, Admin, and the requester can see payment details. Add every bank account the supplier uses.</p>
+                    </Field>
+                  </div>
+
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTouched(true)
+                        setSplitSuppliers(true)
+                      }}
+                      className="focus-ring inline-flex items-center gap-2 rounded-2xl border border-black/10 bg-[var(--canvas)] px-4 py-2.5 text-xs font-semibold text-[var(--ink)] transition-colors hover:border-black/25 hover:bg-white"
+                    >
+                      <Layers size={14} className="text-[var(--accent)]" />
+                      Use different suppliers for each project
+                    </button>
+                  </div>
+                </section>
+              )
+            })()
+          ) : (
+            <>
+              {selectedProjects.map((project) => {
+                const supplier = form.suppliers[project.id] ?? EMPTY_SUPPLIER
+                const currentAccounts = supplier.payment_accounts?.length ? supplier.payment_accounts : [{ ...EMPTY_ACCOUNT }]
+                const currentMethod = supplier.payment_method || ''
                 return (
-                  <button
-                    key={method}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => {
-                      setTouched(true)
-                      setForm((f) => ({
-                        ...f,
-                        supplier_payment_method: active ? '' : method,
-                        payment_accounts: active ? [{ ...EMPTY_ACCOUNT }] : method === 'telebirr' ? [f.payment_accounts[0] ?? { ...EMPTY_ACCOUNT }] : f.payment_accounts,
-                      }))
-                    }}
-                    className={clsx(
-                      'focus-ring rounded-2xl border px-4 py-3 text-sm font-medium transition-colors',
-                      active ? 'border-[var(--ink)] bg-[var(--ink)] text-white' : 'border-black/10 text-[var(--ink)] hover:border-black/30',
+                  <section key={project.id} className="space-y-4 rounded-[1.5rem] border border-black/10 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2 text-sm font-bold text-[var(--ink)]">
+                        <Building2 size={16} className="shrink-0 text-[var(--accent)]" />
+                        <span className="truncate">{project.name}</span>
+                      </div>
+                      <span className="shrink-0 text-sm font-semibold text-[var(--ink)]">{money(totalFor(project.id))}</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <Field label="Supplier or company name">
+                        <SupplierNameField
+                          id={`supplier-name-${project.id}`}
+                          value={supplier.supplier_name}
+                          onChange={(value) => updateSupplier(project.id, 'supplier_name', value)}
+                          onSelect={(suggestion) => applySupplierSuggestion(project.id, suggestion)}
+                          placeholder="Supplier or company name"
+                          aria-label={`Supplier name for ${project.name}`}
+                        />
+                      </Field>
+                      <Field label="Supplier address">
+                        <input
+                          id={`supplier-address-${project.id}`}
+                          value={supplier.supplier_address}
+                          onChange={(e) => updateSupplier(project.id, 'supplier_address', e.target.value)}
+                          placeholder="City, site, or address"
+                          className={clsx(inputClass, 'border-transparent')}
+                        />
+                      </Field>
+                      <Field label="Supplier contact phone">
+                        <input
+                          id={`supplier-phone-${project.id}`}
+                          type="tel"
+                          value={supplier.supplier_phone}
+                          onChange={(e) => updateSupplier(project.id, 'supplier_phone', e.target.value)}
+                          placeholder="Supplier phone number"
+                          className={clsx(inputClass, 'border-transparent')}
+                        />
+                      </Field>
+                    </div>
+
+                    {existingProformas[project.id] && (
+                      <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
+                        Attached Proforma: <span className="font-semibold text-[var(--ink)]">{existingProformas[project.id]}</span>
+                      </p>
                     )}
-                  >
-                    {PAYMENT_METHOD_LABELS[method]}
-                  </button>
+                    <Field label={`Proforma for ${project.name}`}>
+                      <DropZone
+                        id={`proforma-${project.id}`}
+                        highlighted={highlightId === `proforma-${project.id}`}
+                        file={proformaFiles[project.id] ?? null}
+                        onFile={(file) => {
+                          setTouched(true)
+                          setProformaFiles((current) => ({ ...current, [project.id]: file }))
+                        }}
+                      />
+                    </Field>
+
+                    <div className="space-y-3 border-t border-black/[0.06] pt-3">
+                      <Field label={`Payment accounts for ${project.name}`}>
+                        <div
+                          id={`payment-method-${project.id}`}
+                          role="group"
+                          aria-label={`Payment method for ${project.name}`}
+                          className={clsx(
+                            'grid grid-cols-2 gap-2 rounded-2xl transition-shadow',
+                            highlightId === `payment-method-${project.id}` && 'ring-2 ring-[var(--accent)]',
+                          )}
+                        >
+                          {(Object.keys(PAYMENT_METHOD_LABELS) as SupplierPaymentMethod[]).map((method) => {
+                            const active = currentMethod === method
+                            return (
+                              <button
+                                key={method}
+                                type="button"
+                                aria-pressed={active}
+                                onClick={() => {
+                                  const newAccounts = active ? [{ ...EMPTY_ACCOUNT }] : method === 'telebirr' ? [currentAccounts[0] ?? { ...EMPTY_ACCOUNT }] : currentAccounts
+                                  updateSupplier(project.id, 'payment_method', active ? '' : method)
+                                  updateSupplier(project.id, 'payment_accounts', newAccounts)
+                                }}
+                                className={clsx(
+                                  'focus-ring rounded-2xl border px-4 py-3 text-sm font-medium transition-colors',
+                                  active ? 'border-[var(--ink)] bg-[var(--ink)] text-white' : 'border-black/10 text-[var(--ink)] hover:border-black/30',
+                                )}
+                              >
+                                {PAYMENT_METHOD_LABELS[method]}
+                              </button>
+                            )
+                          })}
+                        </div>
+
+                        {currentMethod === 'telebirr' && (
+                          <div className="mt-3 space-y-2">
+                            <input
+                              id={`account-number-${project.id}-0`}
+                              value={currentAccounts[0]?.account_number ?? ''}
+                              onChange={(e) =>
+                                updateSupplierAccount(project.id, 0, {
+                                  account_number: e.target.value,
+                                  bank_name: '',
+                                  account_holder_name: currentAccounts[0]?.account_holder_name ?? '',
+                                })
+                              }
+                              inputMode="numeric"
+                              placeholder="Telebirr phone number, e.g. 0912345678"
+                              aria-label={`Telebirr number for ${project.name}`}
+                              className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
+                            />
+                            <input
+                              value={currentAccounts[0]?.account_holder_name ?? ''}
+                              onChange={(e) => updateSupplierAccount(project.id, 0, { account_holder_name: e.target.value })}
+                              placeholder="Account holder name"
+                              aria-label={`Account holder name for ${project.name}`}
+                              className={clsx(inputClass, 'border-transparent')}
+                            />
+                          </div>
+                        )}
+
+                        {(currentMethod === 'bank' || !currentMethod) && (
+                          <div className="mt-3 space-y-3">
+                            {currentAccounts.map((account, index) => (
+                              <div key={index} className="rounded-[1.25rem] border border-black/10 bg-white p-3">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                  <p className="text-sm font-semibold text-[var(--ink)]">Account {index + 1}</p>
+                                  {currentAccounts.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => removeSupplierAccount(project.id, index)}
+                                      aria-label={`Remove account ${index + 1} for ${project.name}`}
+                                      className="focus-ring rounded-full p-1.5 text-slate-400 hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
+                                    >
+                                      <Trash2 size={15} />
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                                  <input
+                                    id={`bank-name-${project.id}-${index}`}
+                                    value={account.bank_name}
+                                    onChange={(e) => updateSupplierAccount(project.id, index, { bank_name: e.target.value })}
+                                    placeholder="Bank name, e.g. CBE"
+                                    aria-label={`Bank name for account ${index + 1} (${project.name})`}
+                                    className={clsx(inputClass, 'border-transparent')}
+                                  />
+                                  <input
+                                    id={`account-number-${project.id}-${index}`}
+                                    value={account.account_number}
+                                    onChange={(e) => updateSupplierAccount(project.id, index, { account_number: e.target.value })}
+                                    inputMode="numeric"
+                                    placeholder="Account number"
+                                    aria-label={`Account number ${index + 1} (${project.name})`}
+                                    className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
+                                  />
+                                  <input
+                                    value={account.account_holder_name}
+                                    onChange={(e) => updateSupplierAccount(project.id, index, { account_holder_name: e.target.value })}
+                                    placeholder="Account holder name"
+                                    aria-label={`Account holder name ${index + 1} (${project.name})`}
+                                    className={clsx(inputClass, 'border-transparent')}
+                                  />
+                                  <input
+                                    value={account.phone_number}
+                                    onChange={(e) => updateSupplierAccount(project.id, index, { phone_number: e.target.value })}
+                                    inputMode="tel"
+                                    placeholder="Phone number"
+                                    aria-label={`Phone number ${index + 1} (${project.name})`}
+                                    className={clsx(inputClass, 'border-transparent')}
+                                  />
+                                </div>
+                              </div>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => addSupplierAccount(project.id)}
+                              className="focus-ring flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-black/10 py-3 text-sm font-medium text-[var(--ink)] hover:border-black/30"
+                            >
+                              <Plus size={16} />
+                              Add another account
+                            </button>
+                          </div>
+                        )}
+                      </Field>
+                    </div>
+                  </section>
                 )
               })}
-            </div>
-
-            {form.supplier_payment_method === 'telebirr' && (
-              <div className="mt-3 space-y-2">
-                <input
-                  id="account-number-0"
-                  value={form.payment_accounts[0]?.account_number ?? ''}
-                  onChange={(e) => updateAccount(0, { account_number: e.target.value, bank_name: '', account_holder_name: form.payment_accounts[0]?.account_holder_name ?? '' })}
-                  inputMode="numeric"
-                  placeholder="Telebirr phone number, e.g. 0912345678"
-                  aria-label="Telebirr number"
-                  className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
-                />
-                <input
-                  value={form.payment_accounts[0]?.account_holder_name ?? ''}
-                  onChange={(e) => updateAccount(0, { account_holder_name: e.target.value })}
-                  placeholder="Account holder name"
-                  aria-label="Account holder name"
-                  className={clsx(inputClass, 'border-transparent')}
-                />
-              </div>
-            )}
-
-            {(form.supplier_payment_method === 'bank' || !form.supplier_payment_method) && (
-              <div className="mt-3 space-y-3">
-                {form.payment_accounts.map((account, index) => (
-                  <div key={index} className="rounded-[1.25rem] border border-black/10 bg-white p-3">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className="text-sm font-semibold text-[var(--ink)]">Account {index + 1}</p>
-                      {form.payment_accounts.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeAccount(index)}
-                          aria-label={`Remove account ${index + 1}`}
-                          className="focus-ring rounded-full p-1.5 text-slate-400 hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <input
-                        id={`bank-name-${index}`}
-                        value={account.bank_name}
-                        onChange={(e) => updateAccount(index, { bank_name: e.target.value })}
-                        placeholder="Bank name, e.g. CBE"
-                        aria-label={`Bank name for account ${index + 1}`}
-                        className={clsx(inputClass, 'border-transparent')}
-                      />
-                      <input
-                        id={`account-number-${index}`}
-                        value={account.account_number}
-                        onChange={(e) => updateAccount(index, { account_number: e.target.value })}
-                        inputMode="numeric"
-                        placeholder="Account number"
-                        aria-label={`Account number ${index + 1}`}
-                        className={clsx(inputClass, err(3, !!paymentError) ? 'border-[var(--accent)]' : 'border-transparent')}
-                      />
-                      <input
-                        value={account.account_holder_name}
-                        onChange={(e) => updateAccount(index, { account_holder_name: e.target.value })}
-                        placeholder="Account holder name"
-                        aria-label={`Account holder name ${index + 1}`}
-                        className={clsx(inputClass, 'border-transparent')}
-                      />
-                      <input
-                        value={account.phone_number}
-                        onChange={(e) => updateAccount(index, { phone_number: e.target.value })}
-                        inputMode="tel"
-                        placeholder="Phone number"
-                        aria-label={`Phone number ${index + 1}`}
-                        className={clsx(inputClass, 'border-transparent')}
-                      />
-                    </div>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={addAccount}
-                  className="focus-ring flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-black/10 py-3 text-sm font-medium text-[var(--ink)] hover:border-black/30"
-                >
-                  <Plus size={16} />
-                  Add another account
-                </button>
-              </div>
-            )}
-            {err(3, !!paymentError) && <p className="mt-2 text-xs font-medium text-[var(--accent)]">{paymentError}</p>}
-            <p className="mt-2 text-xs text-slate-500">Only Finance, Admin, and the requester can see payment details. Add every bank account the supplier uses.</p>
-          </Field>
+              {multiProject && splitSuppliers && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTouched(true)
+                      const primary = form.suppliers[form.project_ids[0]] ?? EMPTY_SUPPLIER
+                      setForm((f) => {
+                        const nextSuppliers = { ...f.suppliers }
+                        for (const pid of f.project_ids) {
+                          nextSuppliers[pid] = { ...primary }
+                        }
+                        return {
+                          ...f,
+                          suppliers: nextSuppliers,
+                          supplier_payment_method: primary.payment_method || f.supplier_payment_method,
+                          payment_accounts: primary.payment_accounts?.length ? primary.payment_accounts : f.payment_accounts,
+                        }
+                      })
+                      setSplitSuppliers(false)
+                    }}
+                    className="focus-ring text-xs font-semibold text-[var(--accent)] hover:underline"
+                  >
+                    Use one supplier for both projects
+                  </button>
+                </div>
+              )}
+            </>
+          )}
           <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
             Each selected project needs its own supplier details and Proforma. Project line totals add up to{' '}
             <span className="font-semibold text-[var(--ink)]">{money(itemsTotal)}</span>.

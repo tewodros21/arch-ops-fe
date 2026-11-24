@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Copy, RefreshCw, UserPlus } from 'lucide-react'
+import { CustomSelect } from '@/components/ui'
 import { notify } from '@/lib/notify'
 import { createUser, fetchProjects } from '@/services'
 import { ROLE_LABELS, type Profile, type Project, type Role } from '@/types'
@@ -99,11 +100,13 @@ export function UserFormModal({ onClose, onSaved }: { onClose: () => void; onSav
         />
       </Field>
       <Field label="Role" htmlFor="u-role">
-        <select id="u-role" value={role} onChange={(e) => setRole(e.target.value as Role)} className="field ">
-          {ROLES.map((r) => (
-            <option className="" key={r} value={r}>{ROLE_LABELS[r]}</option>
-          ))}
-        </select>
+        <CustomSelect<Role>
+          id="u-role"
+          value={role}
+          onChange={setRole}
+          options={ROLES.map((r) => ({ value: r, label: ROLE_LABELS[r] }))}
+          buttonClassName="!h-12 !rounded-2xl border-transparent"
+        />
       </Field>
       <ProjectAssignmentField
         enabled={role === 'project_manager'}
