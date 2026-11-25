@@ -71,7 +71,7 @@ const STEPS: Step[] = [
   { title: 'Details', hint: 'Requested by, project location and reason' },
   { title: 'Materials', hint: 'Material type, quantity and price per piece' },
   { title: 'Total & timing', hint: 'Total price, due date and reason' },
-  { title: 'Supplier & Proforma', hint: 'Supplier, payment accounts and required Proforma' },
+  { title: 'Supplier & Proforma', hint: 'Supplier, payment accounts and Proforma (optional)' },
   { title: 'Review', hint: 'Save a draft or submit' },
 ]
 
@@ -600,9 +600,8 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     }
     return validatePaymentFor(form.supplier_payment_method, form.payment_accounts)
   })()
-  const hasProformas = selectedProjects.length > 0 && selectedProjects.every((project) =>
-    !!(proformaFiles[project.id] || existingProformas[project.id]),
-  )
+  const attachedProformas = selectedProjects.filter((project) => !!(proformaFiles[project.id] || existingProformas[project.id])).length
+  const hasProformas = selectedProjects.length > 0 && attachedProformas === selectedProjects.length
 
   /** One entry per concrete gap blocking submission; drives the Review-step banner links */
   interface MissingItem { targetId: string; label: string }
@@ -618,11 +617,6 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
     }
     if (!supplier.supplier_phone.trim()) {
       missingItems.push({ targetId: `supplier-phone-${primaryId}`, label: 'Supplier phone' })
-    }
-    for (const project of selectedProjects) {
-      if (!proformaFiles[project.id] && !existingProformas[project.id]) {
-        missingItems.push({ targetId: `proforma-${project.id}`, label: `Proforma for ${project.name}` })
-      }
     }
     if (!form.supplier_payment_method) {
       missingItems.push({ targetId: 'payment-method', label: 'Payment method' })
@@ -645,9 +639,6 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       }
       if (!supplier.supplier_phone.trim()) {
         missingItems.push({ targetId: `supplier-phone-${project.id}`, label: `Supplier phone for ${project.name}` })
-      }
-      if (!proformaFiles[project.id] && !existingProformas[project.id]) {
-        missingItems.push({ targetId: `proforma-${project.id}`, label: `Proforma for ${project.name}` })
       }
       const projectMethod = supplier.payment_method || form.supplier_payment_method
       const projectAccounts = supplier.payment_accounts?.length ? supplier.payment_accounts : form.payment_accounts
@@ -741,12 +732,6 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       setShowErrors(true)
       setStep(3)
       notify.warning('Complete supplier, contact, and payment details for every selected project')
-      return
-    }
-    if (submitAfter && !hasProformas) {
-      setShowErrors(true)
-      setStep(3)
-      notify.warning('Upload a Proforma for every selected project')
       return
     }
     setBusy(true)
@@ -896,7 +881,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
       onGoTo={goTo}
       onSubmit={() => save(true)}
       submitLabel="Submit for Finance review"
-      submitDisabled={!hasSupplierDetails || !hasPaymentDetails || !hasProformas}
+      submitDisabled={!hasSupplierDetails || !hasPaymentDetails}
       secondaryAction={{ label: editing ? 'Save changes' : 'Save as draft', onClick: () => save(false) }}
       discardPrompt={editing ? 'Discard your changes?' : 'Discard this request?'}
       busy={busy}
@@ -1652,7 +1637,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </>
           )}
           <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-[var(--ink-soft)]">
-            Each selected project needs its own supplier details and Proforma. Project line totals add up to{' '}
+            Each selected project needs its own supplier details; a Proforma is optional. Project line totals add up to{' '}
             <span className="font-semibold text-[var(--ink)]">{money(itemsTotal)}</span>.
           </p>
         </>
@@ -1697,7 +1682,11 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             />
             <ReviewTile
               label="Supplier / Proforma"
-              value={hasSupplierDetails && hasProformas ? `${selectedProjects.length} Proforma${selectedProjects.length === 1 ? '' : 's'} attached` : 'Incomplete'}
+              value={
+                !hasSupplierDetails
+                  ? 'Incomplete'
+                  : `${attachedProformas} of ${selectedProjects.length} Proforma${selectedProjects.length === 1 ? '' : 's'} attached`
+              }
               onEdit={() => setStep(3)}
             />
           </div>
@@ -1728,7 +1717,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             </div>
           )}
 
-          {!hasSupplierDetails || !hasPaymentDetails || !hasProformas ? (
+          {!hasSupplierDetails || !hasPaymentDetails ? (
             <div className="flex items-start gap-3 rounded-[1.5rem] bg-[var(--accent-soft)] p-4 text-sm text-[var(--ink)]">
               <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[var(--accent)]">
                 <Info size={16} />
@@ -1759,7 +1748,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
                 {profile?.role === 'project_manager'
                   ? 'Submitting sends this request directly to Finance for review.'
                   : 'Submitting sends this request to the assigned Project Manager, then Finance.'}
-                {' '}Each project's Proforma is attached to the request.
+                {hasProformas ? " Each project's Proforma is attached to the request." : ''}
               </span>
             </div>
           )}
@@ -1822,7 +1811,7 @@ function DropZone({ id, highlighted = false, file, onFile }: { id?: string; high
     >
       <Upload size={16} className="shrink-0" />
       <span>
-        Add Proforma document (required to submit) or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
+        Add Proforma document (optional) or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
       </span>
       <input
         type="file"
