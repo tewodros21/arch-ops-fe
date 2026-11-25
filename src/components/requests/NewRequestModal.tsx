@@ -1822,7 +1822,7 @@ function DropZone({ id, highlighted = false, file, onFile }: { id?: string; high
     >
       <Upload size={16} className="shrink-0" />
       <span>
-        Add Proforma document (optional) or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
+        Add Proforma document (required to submit) or <span className="font-semibold text-[var(--ink)] underline underline-offset-2">browse</span>
       </span>
       <input
         type="file"
