@@ -12,6 +12,7 @@ import type {
   RequestStatus,
   Role,
   SupplierPaymentMethod,
+  SupplierSuggestion,
   SiteEmployee,
   Vendor,
   VendorQuotation,
@@ -74,7 +75,9 @@ export interface RequestInput {
     payment_method: SupplierPaymentMethod | ''
     bank_name: string
     account_number: string
-    payment_accounts: SupplierPaymentAccountInput[]
+    account_holder_name?: string
+    phone_number?: string
+    payment_accounts?: SupplierPaymentAccountInput[]
   }[]
   justification: string
   required_date: string | null
@@ -252,6 +255,8 @@ export interface Backend {
       items: { project_id: string; name: string }[],
       excludeRequestId?: string,
     ): Promise<Result<PurchaseDuplicate[]>>
+    /** Suppliers from past requests matching the query (requester roles only) */
+    supplierSuggestions(query: string): Promise<Result<SupplierSuggestion[]>>
     /** Always a draft for the signed-in user; the request number is assigned by the server */
     create(input: RequestInput): Promise<Result<{ id: string }>>
     update(id: string, input: RequestInput): Promise<Result>

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Open ArchOps</title>
+  <style>
+    body {
+      font-family: -apple-system, system-ui, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #111;
+      color: #fff;
+      padding: 24px;
+      text-align: center;
+    }
+    a.btn {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 16px 28px;
+      background: #fff;
+      color: #111;
+      text-decoration: none;
+      font-size: 18px;
+      font-weight: 600;
+      border-radius: 12px;
+    }
+    p { opacity: 0.75; line-height: 1.4; max-width: 28rem; }
+  </style>
+  <script>
+    // Opens Expo Go directly (published ArchOps update — no install chooser page)
+    var ARCHOPS_EXPO =
+      "exp://u.expo.dev/e2c9325c-0353-4e88-9c57-b6d470ea405e?runtime-version=1.0.0&channel-name=preview";
+    window.location.href = ARCHOPS_EXPO;
+  </script>
+</head>
+<body>
+  <div>
+    <h1>ArchOps</h1>
+    <p>Tap below, then choose <strong>Open</strong> in Expo Go.</p>
+    <a
+      class="btn"
+      href="exp://u.expo.dev/e2c9325c-0353-4e88-9c57-b6d470ea405e?runtime-version=1.0.0&channel-name=preview"
+      >Open in Expo Go</a
+    >
+  </div>
+</body>
+</html>

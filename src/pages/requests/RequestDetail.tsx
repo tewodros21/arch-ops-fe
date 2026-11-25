@@ -26,7 +26,7 @@ import {
   PURCHASE_SAVED_EVENT,
   type PurchaseUnavailable,
 } from '@/services/requests'
-import { ATTACHMENT_TYPE_LABELS, PAYMENT_METHOD_LABELS, ROLE_LABELS, type Approval, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest, type SupplierPaymentAccount, type SupplierPaymentMethod } from '@/types'
+import { ATTACHMENT_TYPE_LABELS, PAYMENT_METHOD_LABELS, ROLE_LABELS, type Approval, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest } from '@/types'
 import { formatCurrency } from '@/utils'
 
 export function RequestDetail() {
@@ -651,26 +651,6 @@ export function RequestDetail() {
                         <Meta label="Supplier address">{supplier.supplier_address || t('Not provided')}</Meta>
                         <Meta label="Supplier contact phone">{supplier.supplier_phone || t('Not provided')}</Meta>
                       </div>
-                      {seesPayment && !isShopkeeper && (
-                        <PaymentAccounts
-                          className="mt-4 border-t border-black/[0.06] pt-4"
-                          method={supplier.payment_method || (supplier.project_id === req.project_id ? paymentMethod : '') || ''}
-                          accounts={
-                            supplier.payment_accounts?.length
-                              ? supplier.payment_accounts
-                              : supplier.project_id === req.project_id && req.supplier_payment_accounts?.length
-                                ? req.supplier_payment_accounts
-                                : [
-                                    {
-                                      bank_name: supplier.bank_name ?? '',
-                                      account_number: supplier.account_number ?? '',
-                                      account_holder_name: '',
-                                      phone_number: '',
-                                    },
-                                  ]
-                          }
-                        />
-                      )}
                       {!isShopkeeper && supplierProformas.length > 0 && (
                         <div className="mt-4 flex flex-wrap gap-2 border-t border-black/[0.06] pt-4">
                           {supplierProformas.map((attachment) => (
@@ -687,9 +667,75 @@ export function RequestDetail() {
                           ))}
                         </div>
                       )}
+                      {seesPayment && !isShopkeeper && (supplier.payment_method || supplier.account_number || supplier.bank_name || supplier.payment_accounts?.length) && (
+                        <div className="mt-4 space-y-2 border-t border-black/[0.06] pt-4">
+                          <Meta label="Pay by">
+                            {supplier.payment_method ? PAYMENT_METHOD_LABELS[supplier.payment_method] : paymentMethod ? PAYMENT_METHOD_LABELS[paymentMethod] : 'Not provided'}
+                          </Meta>
+                          {(supplier.payment_accounts?.length
+                            ? supplier.payment_accounts
+                            : [
+                                {
+                                  bank_name: supplier.bank_name ?? '',
+                                  account_number: supplier.account_number ?? '',
+                                  account_holder_name: supplier.account_holder_name ?? '',
+                                  phone_number: supplier.phone_number ?? '',
+                                },
+                              ]
+                          )
+                            .filter((account) => account.bank_name || account.account_number || account.account_holder_name || account.phone_number)
+                            .map((account, accIdx) => (
+                              <div key={accIdx} className="grid grid-cols-1 gap-3 rounded-xl bg-white/60 p-3 sm:grid-cols-2 lg:grid-cols-4">
+                                {supplier.payment_method !== 'telebirr' && <Meta label="Bank name">{account.bank_name || 'Not provided'}</Meta>}
+                                <Meta label={supplier.payment_method === 'telebirr' ? 'Telebirr number' : 'Account number'}>
+                                  {account.account_number ? <span className="font-mono tracking-wide select-all">{account.account_number}</span> : 'Not provided'}
+                                </Meta>
+                                <Meta label="Account holder">{account.account_holder_name || 'Not provided'}</Meta>
+                                <Meta label="Phone number">{account.phone_number || 'Not provided'}</Meta>
+                              </div>
+                            ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
+                {seesPayment && !isShopkeeper && !projectSuppliers.some((s) => s.payment_accounts?.length || s.account_number || s.bank_name) && (
+                  <div className="space-y-3 rounded-2xl bg-[var(--canvas)] p-4">
+                    <Meta label="Pay by">{paymentMethod ? PAYMENT_METHOD_LABELS[paymentMethod] : 'Not provided'}</Meta>
+                    {(req.supplier_payment_accounts?.length
+                      ? req.supplier_payment_accounts
+                      : [
+                          {
+                            bank_name: req.supplier_bank_name ?? projectSuppliers[0]?.bank_name ?? '',
+                            account_number: req.supplier_account_number ?? projectSuppliers[0]?.account_number ?? '',
+                            account_holder_name: req.supplier_account_holder_name ?? '',
+                            phone_number: req.supplier_phone_number ?? '',
+                          },
+                        ]
+                    )
+                      .filter(
+                        (account) =>
+                          account.bank_name ||
+                          account.account_number ||
+                          account.account_holder_name ||
+                          account.phone_number,
+                      )
+                      .map((account, index) => (
+                        <div key={index} className="grid grid-cols-1 gap-3 border-t border-black/[0.06] pt-3 sm:grid-cols-2 lg:grid-cols-4">
+                          {paymentMethod !== 'telebirr' && <Meta label="Bank name">{account.bank_name || 'Not provided'}</Meta>}
+                          <Meta label={paymentMethod === 'telebirr' ? 'Telebirr number' : 'Account number'}>
+                            {account.account_number ? (
+                              <span className="font-mono tracking-wide select-all">{account.account_number}</span>
+                            ) : (
+                              'Not provided'
+                            )}
+                          </Meta>
+                          <Meta label="Account holder">{account.account_holder_name || 'Not provided'}</Meta>
+                          <Meta label="Phone number">{account.phone_number || 'Not provided'}</Meta>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
             ) : (
               <>
@@ -701,22 +747,41 @@ export function RequestDetail() {
                   )}
                 </div>
                 {seesPayment && !isShopkeeper && (
-                  <PaymentAccounts
-                    className="mt-4 rounded-2xl bg-[var(--canvas)] p-4"
-                    method={paymentMethod || ''}
-                    accounts={
-                      req.supplier_payment_accounts?.length
-                        ? req.supplier_payment_accounts
-                        : [
-                            {
-                              bank_name: req.supplier_bank_name ?? '',
-                              account_number: req.supplier_account_number ?? '',
-                              account_holder_name: req.supplier_account_holder_name ?? '',
-                              phone_number: req.supplier_phone_number ?? '',
-                            },
-                          ]
-                    }
-                  />
+                  <div className="mt-4 space-y-3 rounded-2xl bg-[var(--canvas)] p-4">
+                    <Meta label="Pay by">{paymentMethod ? PAYMENT_METHOD_LABELS[paymentMethod] : 'Not provided'}</Meta>
+                    {(req.supplier_payment_accounts?.length
+                      ? req.supplier_payment_accounts
+                      : [
+                          {
+                            bank_name: req.supplier_bank_name ?? '',
+                            account_number: req.supplier_account_number ?? '',
+                            account_holder_name: req.supplier_account_holder_name ?? '',
+                            phone_number: req.supplier_phone_number ?? '',
+                          },
+                        ]
+                    )
+                      .filter(
+                        (account) =>
+                          account.bank_name ||
+                          account.account_number ||
+                          account.account_holder_name ||
+                          account.phone_number,
+                      )
+                      .map((account, index) => (
+                        <div key={index} className="grid grid-cols-1 gap-3 border-t border-black/[0.06] pt-3 sm:grid-cols-2 lg:grid-cols-4">
+                          {paymentMethod !== 'telebirr' && <Meta label="Bank name">{account.bank_name || 'Not provided'}</Meta>}
+                          <Meta label={paymentMethod === 'telebirr' ? 'Telebirr number' : 'Account number'}>
+                            {account.account_number ? (
+                              <span className="font-mono tracking-wide select-all">{account.account_number}</span>
+                            ) : (
+                              'Not provided'
+                            )}
+                          </Meta>
+                          <Meta label="Account holder">{account.account_holder_name || 'Not provided'}</Meta>
+                          <Meta label="Phone number">{account.phone_number || 'Not provided'}</Meta>
+                        </div>
+                      ))}
+                  </div>
                 )}
               </>
             )}
@@ -1049,39 +1114,5 @@ function FilePick({ file, onFile, label = 'Choose a file' }: { file: File | null
         }}
       />
     </label>
-  )
-}
-
-/** How to pay one supplier: method plus every account it gave */
-function PaymentAccounts({
-  method,
-  accounts,
-  className,
-}: {
-  method: SupplierPaymentMethod | ''
-  accounts: SupplierPaymentAccount[]
-  className?: string
-}) {
-  const filled = accounts.filter(
-    (account) => account.bank_name || account.account_number || account.account_holder_name || account.phone_number,
-  )
-  return (
-    <div className={clsx('space-y-3', className)}>
-      <Meta label="Pay by">{method ? PAYMENT_METHOD_LABELS[method] : 'Not provided'}</Meta>
-      {filled.map((account, index) => (
-        <div key={index} className="grid grid-cols-1 gap-3 border-t border-black/[0.06] pt-3 sm:grid-cols-2 lg:grid-cols-4">
-          {method !== 'telebirr' && <Meta label="Bank name">{account.bank_name || 'Not provided'}</Meta>}
-          <Meta label={method === 'telebirr' ? 'Telebirr number' : 'Account number'}>
-            {account.account_number ? (
-              <span className="font-mono tracking-wide select-all">{account.account_number}</span>
-            ) : (
-              'Not provided'
-            )}
-          </Meta>
-          <Meta label="Account holder">{account.account_holder_name || 'Not provided'}</Meta>
-          <Meta label="Phone number">{account.phone_number || 'Not provided'}</Meta>
-        </div>
-      ))}
-    </div>
   )
 }
