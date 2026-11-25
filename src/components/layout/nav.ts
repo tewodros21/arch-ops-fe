@@ -16,7 +16,7 @@ export const NAV: NavEntry[] = [
   { to: '/dashboard', label: 'Overview', short: 'Home', icon: LayoutGrid, roles: null },
   { to: '/requests', label: 'Purchase Requests', short: 'Purchases', icon: ShoppingCart, roles: null },
   { to: '/labor', label: 'Labor Requests', short: 'Labor', icon: Users, roles: null },
-  { to: '/vendors', label: 'Vendors', short: 'Vendors', icon: Store, roles: ['admin', 'finance'] },
+  { to: '/vendors', label: 'Vendors', short: 'Vendors', icon: Store, roles: ['finance'] },
   { to: '/admin/projects', label: 'Projects', short: 'Projects', icon: FolderKanban, roles: ['ceo'] },
   { to: '/audit', label: 'Audit Log', short: 'Audit', icon: History, roles: ['admin', 'ceo'] },
   { to: '/admin', label: 'Admin', short: 'Admin', icon: Settings2, roles: ['admin'] },
