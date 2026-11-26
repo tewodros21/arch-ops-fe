@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { FolderKanban } from 'lucide-react'
+import clsx from 'clsx'
+import { Check, FolderKanban } from 'lucide-react'
 import { notify } from '@/lib/notify'
 import { fetchTeamMembers, saveProject } from '@/services'
 import type { Profile, Project } from '@/types'
@@ -12,7 +13,7 @@ export function ProjectFormModal({ project, onClose, onSaved }: { project: Proje
   const [location, setLocation] = useState(project?.location ?? '')
   const [budget, setBudget] = useState(project?.budget != null ? String(project.budget) : '')
   const [active, setActive] = useState(project?.is_active ?? true)
-  const [managerId, setManagerId] = useState(project?.project_manager_ids?.[0] ?? '')
+  const [managerIds, setManagerIds] = useState<string[]>(project?.project_manager_ids ?? [])
   const [managers, setManagers] = useState<Profile[]>([])
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export function ProjectFormModal({ project, onClose, onSaved }: { project: Proje
       location: location.trim() || null,
       budget: budgetNum,
       is_active: active,
-      project_manager_id: managerId || null,
+      project_manager_ids: managerIds,
     }
     const { data, error } = await saveProject(row, project?.id)
     if (error || !data) {
@@ -87,18 +88,36 @@ export function ProjectFormModal({ project, onClose, onSaved }: { project: Proje
           className={errors.budget ? 'field !border-[var(--accent)]' : 'field'}
         />
       </Field>
-      <Field label="Project Manager" htmlFor="pr-manager" hint="Approves this project's purchase requests">
-        <select id="pr-manager" value={managerId} onChange={(e) => setManagerId(e.target.value)} className="field">
-          <option value="">Assign later</option>
-          {managers.map((m) => (
-            <option key={m.id} value={m.id}>
-              {m.full_name}
-              {m.assigned_project_ids?.length && !project?.project_manager_ids?.includes(m.id)
-                ? ` · ${m.assigned_project_ids.length} project${m.assigned_project_ids.length === 1 ? '' : 's'}`
-                : ''}
-            </option>
-          ))}
-        </select>
+      <Field label="Project Managers" hint="Any one of them can approve this project's requests">
+        {managers.length === 0 ? (
+          <p className="rounded-2xl bg-[var(--canvas)] px-4 py-3 text-sm text-slate-500">No active project managers yet. You can assign them later.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Project Managers">
+            {managers.map((m) => {
+              const selected = managerIds.includes(m.id)
+              const others = (m.assigned_project_ids ?? []).filter((id) => id !== project?.id).length
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setManagerIds((ids) => (selected ? ids.filter((id) => id !== m.id) : [...ids, m.id]))}
+                  className={clsx(
+                    'focus-ring flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
+                    selected ? 'border-[var(--ink)] bg-[var(--ink)] text-white' : 'border-black/10 text-[var(--ink)] hover:border-black/30',
+                  )}
+                >
+                  {selected && <Check size={14} />}
+                  {m.full_name}
+                  {others > 0 && <span className={selected ? 'text-white/70' : 'text-slate-400'}>· {others} other project{others === 1 ? '' : 's'}</span>}
+                </button>
+              )
+            })}
+          </div>
+        )}
+        {managers.length > 0 && managerIds.length === 0 && (
+          <p className="mt-2 text-xs text-slate-500">No PM selected. Requests for this project can't be submitted until one is assigned.</p>
+        )}
       </Field>
       <Toggle checked={active} onChange={setActive} label="Active project" description="Archived projects are hidden from new requests" />
     </FormModal>

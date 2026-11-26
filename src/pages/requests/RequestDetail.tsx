@@ -126,8 +126,13 @@ export function RequestDetail() {
   const currentStage = stageForStatus(req.status)
   const pmApprovals = (req.approvals ?? []).filter((a) => a.stage === 'project_manager')
   const pendingPm = pmApprovals.filter((a) => a.decision === 'pending')
-  // On a multi-project request each project's PM approves; a PM who already did is done
-  const myPmTurn = currentStage !== 'project_manager' || pendingPm.some((a) => !a.reviewer_id || a.reviewer_id === profile?.id)
+  // Each project needs one approval from any of its PMs; older requests had a row per PM
+  const myProjectIds = new Set([...(profile?.assigned_project_ids ?? []), ...(profile?.project_ids ?? [])])
+  const myPmTurn =
+    currentStage !== 'project_manager' ||
+    pendingPm.some((a) =>
+      a.project_id ? myProjectIds.has(a.project_id) : !a.reviewer_id || a.reviewer_id === profile?.id,
+    )
   const myTurn = !!myStage && currentStage === myStage && myPmTurn
   // The server blocks self-approval too; hide the panel instead of letting it fail
   const canAct = myTurn && !isRequester
@@ -187,7 +192,9 @@ export function RequestDetail() {
       ? pmApprovals.map((approval) => ({
           key: approval.id,
           stage,
-          label: `${STAGE_LABELS[stage]}${approval.reviewer ? ` · ${approval.reviewer.full_name}` : ''}`,
+          label: approval.project_id
+            ? `${STAGE_LABELS[stage]} · ${requestProjects.find((p) => p.id === approval.project_id)?.name ?? 'Project'}`
+            : `${STAGE_LABELS[stage]}${approval.reviewer ? ` · ${approval.reviewer.full_name}` : ''}`,
           approval,
         }))
       : [{ key: stage, stage, label: STAGE_LABELS[stage], approval: req.approvals?.find((a) => a.stage === stage) }],

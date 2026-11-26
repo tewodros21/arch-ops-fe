@@ -113,6 +113,8 @@ export interface Approval {
   decision: ApprovalDecision
   reviewer_id: string | null
   reviewer?: Profile
+  /** PM stage: the project this approval is for; any of its PMs can give it */
+  project_id?: string | null
   comments: string | null
   decided_at: string | null
 }

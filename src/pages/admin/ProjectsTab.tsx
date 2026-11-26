@@ -111,10 +111,11 @@ export function ProjectsTab() {
                       )}
                     </p>
                     <p className="truncate text-xs text-slate-500">
-                      PM:{' '}
-                      {team.find((u) => u.id === p.project_manager_ids?.[0])?.full_name ?? (
-                        <span className="text-[var(--accent)]">Not assigned</span>
-                      )}
+                      {(p.project_manager_ids?.length ?? 0) > 1 ? 'PMs' : 'PM'}:{' '}
+                      {(p.project_manager_ids ?? [])
+                        .map((id) => team.find((u) => u.id === id)?.full_name)
+                        .filter(Boolean)
+                        .join(', ') || <span className="text-[var(--accent)]">Not assigned</span>}
                     </p>
                   </div>
                 </div>

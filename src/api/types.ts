@@ -109,8 +109,8 @@ export type VendorInput = Pick<Vendor, 'name' | 'contact_person' | 'phone' | 'em
 }
 
 export type ProjectInput = Pick<Project, 'name' | 'code' | 'client_name' | 'location' | 'budget' | 'is_active'> & {
-  /** Assigns (or with null clears) the project's PM */
-  project_manager_id?: string | null
+  /** The project's PMs; any one of them approves its requests. [] clears them */
+  project_manager_ids?: string[]
 }
 export type DepartmentInput = Pick<Department, 'name' | 'is_active'>
 export type SiteEmployeeInput = Pick<SiteEmployee, 'full_name' | 'department' | 'is_active' | 'notes'>
