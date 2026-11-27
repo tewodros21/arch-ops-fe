@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import clsx from 'clsx'
 import { format } from 'date-fns'
+import { useCalendarPreference } from '@/hooks/useCalendarPreference'
+import { formatDateWithEthiopian, formatEthiopian } from '@/utils'
 import { ArrowRight, Building2, CalendarDays, Clock, HardHat, MapPin, Minus, Plus } from 'lucide-react'
 import { notify } from '@/lib/notify'
 import { fetchProjects } from '@/services/requests'
@@ -22,6 +24,7 @@ const EMPTY_FORM = { project_id: '', labor_type: '', workers_required: 1, locati
 
 export function LaborRequestModal({ onClose }: { onClose: () => void }) {
   const { profile } = useAuth()
+  const { calendar } = useCalendarPreference()
   const [projects, setProjects] = useState<Project[]>([])
   const [loadingProjects, setLoadingProjects] = useState(true)
   const [projectLoadFailed, setProjectLoadFailed] = useState(false)
@@ -117,7 +120,11 @@ export function LaborRequestModal({ onClose }: { onClose: () => void }) {
   }
 
   const project = projects.find((p) => p.id === form.project_id)
-  const when = form.required_at ? format(new Date(form.required_at), 'EEE, MMM d · h:mm a') : null
+  const when = form.required_at
+    ? calendar === 'ethiopian'
+      ? `${formatEthiopian(form.required_at)} · ${format(new Date(form.required_at), 'h:mm a')}`
+      : formatDateWithEthiopian(form.required_at, undefined, calendar)
+    : null
   const dirty =
     !!(form.project_id || form.labor_type || form.location || form.description || form.required_at || form.expected_duration_hours) ||
     form.workers_required !== 1

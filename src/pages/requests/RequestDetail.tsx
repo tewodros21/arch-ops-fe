@@ -27,11 +27,13 @@ import {
   type PurchaseUnavailable,
 } from '@/services/requests'
 import { ATTACHMENT_TYPE_LABELS, PAYMENT_METHOD_LABELS, ROLE_LABELS, type Approval, type ApprovalStage, type AttachmentType, type PurchaseAttachment, type PurchaseRequest } from '@/types'
-import { formatCurrency } from '@/utils'
+import { useCalendarPreference } from '@/hooks/useCalendarPreference'
+import { formatCurrency, formatDateWithEthiopian } from '@/utils'
 
 export function RequestDetail() {
   const { id } = useParams()
   const { profile } = useAuth()
+  const { calendar } = useCalendarPreference()
   const navigate = useNavigate()
   const confirm = useConfirm()
   const t = useT()
@@ -467,8 +469,10 @@ export function RequestDetail() {
             </span>
           </Meta>
           <Meta label="Role">{req.requester ? ROLE_LABELS[req.requester.role] : '—'}</Meta>
-          <Meta label="Needed by">{req.required_date ? format(new Date(`${req.required_date}T00:00`), 'MMM d, yyyy') : 'Not set'}</Meta>
-          {requestDate && <Meta label={req.submitted_at ? 'Submitted' : 'Created'}>{format(new Date(requestDate), 'MMM d, yyyy')}</Meta>}
+          <Meta label="Needed by">{req.required_date ? formatDateWithEthiopian(req.required_date, undefined, calendar) : 'Not set'}</Meta>
+          {requestDate && (
+            <Meta label={req.submitted_at ? 'Submitted' : 'Created'}>{formatDateWithEthiopian(requestDate, undefined, calendar)}</Meta>
+          )}
         </div>}
 
         {!isShopkeeper && req.return_note && EDITABLE_STATUSES.includes(req.status) && (

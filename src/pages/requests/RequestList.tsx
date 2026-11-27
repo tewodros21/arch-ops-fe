@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { differenceInCalendarDays, format } from 'date-fns'
+import { differenceInCalendarDays } from 'date-fns'
 import { ChevronRight, Inbox, Plus, Search, X } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { canCreatePurchaseRequest, EDITABLE_STATUSES } from '@/lib/workflow'
@@ -8,7 +8,8 @@ import { useT } from '@/lib/i18n'
 import { fetchPurchaseRequests, PURCHASE_SAVED_EVENT } from '@/services/requests'
 import { Avatar, PageHeader, StatusBadge } from '@/components/ui'
 import type { PurchaseRequest, RequestStatus } from '@/types'
-import { formatCurrency, projectLabel } from '@/utils'
+import { useCalendarPreference } from '@/hooks/useCalendarPreference'
+import { formatCurrency, formatDueLabel, projectLabel } from '@/utils'
 
 const FILTERS: { key: string; label: string; statuses: RequestStatus[] | null }[] = [
   { key: 'all', label: 'All', statuses: null },
@@ -21,16 +22,17 @@ const FILTERS: { key: string; label: string; statuses: RequestStatus[] | null }[
   { key: 'rejected', label: 'Rejected', statuses: ['rejected'] },
 ]
 
-function dueText(r: PurchaseRequest) {
+function dueText(r: PurchaseRequest, calendar: 'ethiopian' | 'gregorian') {
   if (!r.required_date) return null
-  const diff = differenceInCalendarDays(new Date(r.required_date), new Date())
+  const diff = differenceInCalendarDays(new Date(`${r.required_date}T00:00`), new Date())
   const open = !['approved', 'purchased', 'completed', 'rejected'].includes(r.status)
   if (open && diff < 0) return { text: `Overdue ${-diff}d`, late: true }
-  return { text: format(new Date(r.required_date), 'MMM d'), late: false }
+  return { text: formatDueLabel(r.required_date, calendar), late: false }
 }
 
 export function RequestList() {
   const { profile } = useAuth()
+  const { calendar } = useCalendarPreference()
   const t = useT()
   const [requests, setRequests] = useState<PurchaseRequest[]>([])
   const [loading, setLoading] = useState(true)
@@ -150,7 +152,7 @@ export function RequestList() {
 
         <ul className="divide-y divide-black/[0.05]">
           {filtered.map((r) => {
-            const due = dueText(r)
+            const due = dueText(r, calendar)
             return (
               <li key={r.id}>
                 <Link

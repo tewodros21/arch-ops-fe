@@ -16,6 +16,8 @@ import {
   updateLaborRequest,
 } from '@/services/labor'
 import { LABOR_STATUS_LABELS, ROLE_LABELS, type AuditEvent, type LaborRequest, type LaborStatus } from '@/types'
+import { useCalendarPreference } from '@/hooks/useCalendarPreference'
+import { formatDateWithEthiopian, formatEthiopian } from '@/utils'
 
 const STEP_HINTS: Record<LaborStatus, { done: string; waiting: string }> = {
   requested: { done: 'Raised by the site team', waiting: 'Being raised' },
@@ -29,6 +31,7 @@ const STEP_HINTS: Record<LaborStatus, { done: string; waiting: string }> = {
 export function LaborDetail() {
   const { id } = useParams()
   const { profile } = useAuth()
+  const { calendar } = useCalendarPreference()
   const confirm = useConfirm()
   const [labor, setLabor] = useState<LaborRequest | null>(null)
   const [history, setHistory] = useState<AuditEvent[]>([])
@@ -146,9 +149,13 @@ export function LaborDetail() {
               <span className="truncate">{l.requester?.full_name ?? '—'}</span>
             </span>
           </Meta>
-          <Meta label="Needed at">{format(new Date(l.required_at), 'EEE, MMM d · h:mm a')}</Meta>
+          <Meta label="Needed at">
+            {calendar === 'ethiopian'
+              ? `${formatEthiopian(l.required_at)} · ${format(new Date(l.required_at), 'h:mm a')}`
+              : `${format(new Date(l.required_at), 'EEE, MMM d · h:mm a')} · ${formatEthiopian(l.required_at)}`}
+          </Meta>
           <Meta label="Expected duration">{duration ? `${duration}${duration.endsWith('h') ? '' : ` · ${Number(l.expected_duration_hours)}h`}` : 'Not set'}</Meta>
-          <Meta label="Created">{format(new Date(l.created_at), 'MMM d, yyyy')}</Meta>
+          <Meta label="Created">{formatDateWithEthiopian(l.created_at, undefined, calendar)}</Meta>
         </div>
 
         {l.assigned_to && (

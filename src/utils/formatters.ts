@@ -1,4 +1,5 @@
 import clsx, { type ClassValue } from 'clsx'
+import { formatDateWithEthiopian } from './ethiopianDate'
 
 export function cn(...inputs: ClassValue[]) {
   return clsx(inputs)
@@ -14,18 +15,24 @@ export function formatCurrency(amount: number | null | undefined, currency = 'ET
   }).format(amount ?? 0)
 }
 
+/** Gregorian date with Ethiopian calendar in parentheses (for docs / UI). */
 export function formatDate(dateString: string | null | undefined): string {
   if (!dateString) return '-'
-  try {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    })
-  } catch {
-    return dateString
-  }
+  return formatDateWithEthiopian(dateString)
 }
+
+export {
+  daysInEthiopianMonth,
+  ethiopianToIso,
+  formatDateWithEthiopian,
+  formatDueLabel,
+  formatEthiopian,
+  formatEthiopianShort,
+  fromEthiopian,
+  parseCalendarDate,
+  toEthiopian,
+  toIsoDateString,
+} from './ethiopianDate'
 
 export function getInitials(name: string): string {
   if (!name) return ''

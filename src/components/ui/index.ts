@@ -1,6 +1,7 @@
 export * from './AssetSlot'
 export * from './Avatar'
 export * from './Button'
+export * from './CalendarDateField'
 export * from './GlassCard'
 export * from './PageHeader'
 export * from './StatusBadge'

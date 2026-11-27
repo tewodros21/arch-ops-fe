@@ -8,6 +8,8 @@ import { Button, LaborStatusBadge, PageHeader, useConfirm } from '@/components/u
 import { LABOR_CREATED_EVENT, NEW_LABOR_SEARCH } from '@/constants'
 import { fetchLaborRequests, formatDuration, isLaborManager, NEXT_LABOR_STATUS as NEXT, updateLaborRequest } from '@/services/labor'
 import { LABOR_STATUS_LABELS, type LaborRequest, type LaborStatus } from '@/types'
+import { useCalendarPreference } from '@/hooks/useCalendarPreference'
+import { formatDueLabel } from '@/utils'
 
 const FILTERS: { key: string; label: string; statuses: LaborStatus[] | null }[] = [
   { key: 'active', label: 'Active', statuses: ['requested', 'reviewed', 'assigned', 'in_progress'] },
@@ -46,6 +48,7 @@ function AssigneeField({ labor, onSaved }: { labor: LaborRequest; onSaved: () =>
 }
 
 export function LaborList() {
+  const { calendar } = useCalendarPreference()
   const { profile } = useAuth()
   const [labor, setLabor] = useState<LaborRequest[]>([])
   const [loading, setLoading] = useState(true)
@@ -150,7 +153,9 @@ export function LaborList() {
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[var(--ink-soft)]">
                 <span className="flex items-center gap-2">
                   <CalendarDays size={15} className="shrink-0" />
-                  {format(new Date(l.required_at), 'EEE, MMM d · h:mm a')}
+                  {calendar === 'ethiopian'
+                    ? `${formatDueLabel(l.required_at, calendar)} · ${format(new Date(l.required_at), 'h:mm a')}`
+                    : format(new Date(l.required_at), 'EEE, MMM d · h:mm a')}
                 </span>
                 {formatDuration(l.expected_duration_hours) && (
                   <span className="flex items-center gap-2">
