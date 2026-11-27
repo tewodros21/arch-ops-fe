@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { format } from 'date-fns'
-import { ArrowRight, Building2, CalendarDays, Check, FileText, Info, Layers, Package, Pencil, Plus, ReceiptText, Trash2, Upload, X } from 'lucide-react'
+import { formatDateWithEthiopian } from '@/utils'
+import { ArrowRight, Building2, Check, FileText, Info, Layers, Package, Pencil, Plus, ReceiptText, Trash2, Upload, X } from 'lucide-react'
+import { CalendarDateField } from '@/components/ui'
+import { useCalendarPreference } from '@/hooks/useCalendarPreference'
 import { notify } from '@/lib/notify'
 import { ACCEPT_ATTR, attachFile, formatBytes, validateFile } from '@/lib/storage'
 import { EDITABLE_STATUSES, submitRequest } from '@/lib/workflow'
@@ -88,6 +91,7 @@ const lineTotal = (r: ItemRow) => (Number(r.quantity) || 0) * (Number(r.unit_pri
 
 /** Create a purchase request, or edit a draft when `editId` is given */
 export function NewRequestModal({ onClose, editId }: { onClose: () => void; editId?: string }) {
+  const { calendar } = useCalendarPreference()
   const { profile } = useAuth()
   const navigate = useNavigate()
   const editing = !!editId
@@ -1162,16 +1166,13 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
           </div>
 
           <Field label="Needed by" optional>
-            <div className="relative">
-              <CalendarDays size={18} className="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="date"
-                value={form.required_date}
-                min={format(new Date(), 'yyyy-MM-dd')}
-                onChange={(e) => update('required_date', e.target.value)}
-                className={clsx(inputClass, 'border-transparent pl-11')}
-              />
-            </div>
+            <CalendarDateField
+              value={form.required_date}
+              min={format(new Date(), 'yyyy-MM-dd')}
+              optional
+              inputClassName={clsx(inputClass)}
+              onChange={(next) => update('required_date', next)}
+            />
           </Field>
 
           <Field label="Extra notes for reviewers" optional>
@@ -1664,7 +1665,7 @@ export function NewRequestModal({ onClose, editId }: { onClose: () => void; edit
             />
             <ReviewTile
               label="Needed by"
-              value={form.required_date ? format(new Date(`${form.required_date}T00:00`), 'MMM d, yyyy') : 'Not set'}
+              value={form.required_date ? formatDateWithEthiopian(form.required_date, undefined, calendar) : 'Not set'}
               onEdit={() => setStep(2)}
             />
             <ReviewTile

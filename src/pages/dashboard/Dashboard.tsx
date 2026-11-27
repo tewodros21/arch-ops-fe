@@ -12,7 +12,8 @@ import { SpendCharts } from '@/components/dashboard/SpendCharts'
 import { RangeSelect } from '@/components/dashboard/kit'
 import { COLORS, DONE, IN_REVIEW, isOverdue, money } from '@/components/dashboard/metrics'
 import { formatDuration } from '@/services/labor'
-import { projectLabel } from '@/utils'
+import { useCalendarPreference } from '@/hooks/useCalendarPreference'
+import { formatDueLabel, projectLabel } from '@/utils'
 import { notify } from '@/lib/notify'
 import { useT } from '@/lib/i18n'
 import { LanguageSwitch } from '@/components/ui/LanguageSwitch'
@@ -71,17 +72,19 @@ const SERIES = [
 ] as const
 const SERIES_COLORS: Record<string, string> = Object.fromEntries(SERIES.map((s) => [s.name, s.color]))
 
-function dueLabel(date: string | null) {
+function dueLabel(date: string | null, calendar: 'ethiopian' | 'gregorian') {
   if (!date) return 'No due date'
-  const diff = differenceInCalendarDays(new Date(date), new Date())
+  const local = new Date(`${date}T00:00`)
+  const diff = differenceInCalendarDays(local, new Date())
   if (diff < 0) return `Overdue ${-diff} day${diff === -1 ? '' : 's'}`
   if (diff === 0) return 'Due today'
   if (diff === 1) return 'Due tomorrow'
-  return `Due ${format(new Date(date), 'MMM d')}`
+  return `Due ${formatDueLabel(date, calendar)}`
 }
 
 export function Dashboard() {
   const { profile } = useAuth()
+  const { calendar } = useCalendarPreference()
   const t = useT()
   const [requests, setRequests] = useState<PurchaseRequest[]>([])
   const [labor, setLabor] = useState<LaborRequest[]>([])
@@ -343,7 +346,7 @@ export function Dashboard() {
               <Link key={r.id} to={`/requests/${r.id}`} className="focus-ring block rounded-lg">
                 <p className="truncate text-[15px] text-[var(--ink)]">{r.title}</p>
                 <div className="mt-0.5 flex items-center justify-between text-xs text-slate-500">
-                  <span className={clsx(isOverdue(r) && 'text-[var(--accent)]')}>{dueLabel(r.required_date ?? null)}</span>
+                  <span className={clsx(isOverdue(r) && 'text-[var(--accent)]')}>{dueLabel(r.required_date ?? null, calendar)}</span>
                   <span className="text-[var(--ink)]">{PROGRESS[r.status]}%</span>
                 </div>
                 <div className="mt-2 h-1 rounded-full bg-[var(--cell)]">
@@ -369,7 +372,7 @@ export function Dashboard() {
               </div>
               <div className="space-y-3">
                 {items.slice(0, 3).map((r) => (
-                  <RequestCard key={r.id} request={r} />
+                  <RequestCard key={r.id} request={r} calendar={calendar} />
                 ))}
                 {!loading && items.length === 0 && (
                   <p className="rounded-[1.5rem] border border-dashed border-black/10 px-5 py-8 text-center text-sm text-slate-400">Nothing here</p>
@@ -422,7 +425,7 @@ export function Dashboard() {
   )
 }
 
-function RequestCard({ request: r }: { request: PurchaseRequest }) {
+function RequestCard({ request: r, calendar }: { request: PurchaseRequest; calendar: 'ethiopian' | 'gregorian' }) {
   const [menuOpen, setMenuOpen] = useState(false)
   const overdue = isOverdue(r)
   const dueSoon =
@@ -486,7 +489,7 @@ function RequestCard({ request: r }: { request: PurchaseRequest }) {
       <Link to={`/requests/${r.id}`} className={clsx('flex items-center justify-between border-t px-5 py-3.5 text-sm', dark ? 'border-white/10' : 'border-black/[0.06]')}>
         <span className="flex items-center gap-2">
           <CalendarDays size={16} strokeWidth={1.75} />
-          {dueLabel(r.required_date ?? null)}
+          {dueLabel(r.required_date ?? null, calendar)}
         </span>
         <span className="font-medium">{money(Number(r.approved_amount ?? r.estimated_amount ?? 0))}</span>
       </Link>
