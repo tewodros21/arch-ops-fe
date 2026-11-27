@@ -39,9 +39,9 @@ function isGregorianLeap(year: number): boolean {
   return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
 }
 
-/** Ethiopian New Year (Enkutatash) in Gregorian: 11 Sep, or 12 Sep in Gregorian leap years. */
+/** Ethiopian New Year (Enkutatash) in Gregorian: 11 Sep, or 12 Sep when the next Gregorian year is a leap year. */
 function ethiopianNewYearOnOrBefore(gregorianYear: number): Date {
-  return new Date(gregorianYear, 8, isGregorianLeap(gregorianYear) ? 12 : 11)
+  return new Date(gregorianYear, 8, isGregorianLeap(gregorianYear + 1) ? 12 : 11)
 }
 
 /** Pagumen has 6 days when the Ethiopian year % 4 === 3; otherwise 5. */
